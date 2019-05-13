@@ -1,0 +1,36 @@
+info:
+  name: Metabase Teradata Driver
+  version: 1.0.0-teradata-jdbc-16.00
+  description: Allows Metabase to connect to Teradata databases. Community Supported driver.
+dependencies:
+  - class: com.teradata.jdbc.TeraDriver
+    message: >
+      Metabase requires the Teradata terajdbc4.jar and tdgssconfig.jar in order to be able to connect to Teradata databases.
+driver:
+  name: teradata
+  display-name: Teradata
+  lazy-load: true
+  parent: sql-jdbc
+  connection-properties:
+    - host
+    - merge:
+        - port
+        - default: 1025
+    - name: dbnames
+      display-name: Database name(s) (case sensitive)
+      placeholder: Comma-separated list of database names
+    - name: tmode
+      display-name: Transaction mode
+      default: ANSI
+    - user
+    - password
+    - ssl
+    - merge:
+        - additional-options
+        - placeholder: e.g. COPLAST=OFF
+  connection-properties-include-tunnel-config: true
+init:
+  - step: load-namespace
+    namespace: metabase.driver.teradata
+  - step: register-jdbc-driver
+    class: com.teradata.jdbc.TeraDriver
