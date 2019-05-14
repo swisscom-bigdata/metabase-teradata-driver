@@ -1,8 +1,8 @@
 # Metabase Teradata Driver (Community-Supported)
 
-The Metabase Teradata driver allows Metabase v0.32.7 or above to
-connect to [Teradata](https://www.teradata.com/) databases.
+The Metabase Teradata driver allows Metabase SNAPSHOT to connect to [Teradata](https://www.teradata.com/) databases.
 Instructions for installing it can be found below.
+As soon as the required commit is merged into a future Metabase release version, this driver can be aligned with Metabase tags. 
 
 This driver is community-supported and is not considered part of the
 core Metabase project. If you would like to open a GitHub issue to
