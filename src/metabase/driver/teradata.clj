@@ -205,16 +205,15 @@
 
 ;; Overridden to have access to the database with the configured property dbnames (inclusion list)
 ;; which will be used to filter the schemas.
-(defmethod driver/describe-database :teradata
-  [driver database]
-  (jdbc/with-db-metadata [metadata driver database]
+(defmethod driver/describe-database :teradata [driver database]
+  (jdbc/with-db-metadata [metadata (sql-jdbc.conn/db->pooled-connection-spec database)]
     {:tables (fast-active-tables, driver, ^DatabaseMetaData metadata, database)}))
 
 (defn- run-query
   "Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
    Setting connection attributes like timezone would make subsequent queries behave unexpectedly."
   [{sql :query, params :params, remark :remark} timezone connection]
-  (let [sql              (s/replace (s/replace (str "-- " remark "\n" (hx/unescape-dots sql)) "OFFSET" "") "test_data" "test-data") ;; temporary hack
+  (let [sql              (s/replace (s/replace (str "-- " remark "\n" sql) "OFFSET" "") "test_data" "test-data") ;; temporary hack
         statement        (into [sql] params)
         [columns & rows] (jdbc/query connection statement {:identifiers    identity, :as-arrays? true
                                                            :read-columns   (#'metabase.driver.sql-jdbc.execute/read-columns :teradata timezone)})]
