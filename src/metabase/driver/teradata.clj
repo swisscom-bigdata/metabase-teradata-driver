@@ -135,7 +135,7 @@
 
 (def ^:private ^:const now (hsql/raw "CURRENT_TIMESTAMP"))
 
-(defmethod sql.qp/date [:teradata :default]         [_ _ expr] (some-> expr hx/->date))
+(defmethod sql.qp/date [:teradata :default]         [_ _ expr] expr)
 (defmethod sql.qp/date [:teradata :minute]          [_ _ expr] (timestamp-trunc "yyyy-mm-dd hh24:mi" expr))
 (defmethod sql.qp/date [:teradata :minute-of-hour]  [_ _ expr] (extract-integer :minute expr))
 (defmethod sql.qp/date [:teradata :hour]            [_ _ expr] (timestamp-trunc "yyyy-mm-dd hh24" expr))
