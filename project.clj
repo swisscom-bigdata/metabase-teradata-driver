@@ -1,4 +1,4 @@
-(defproject metabase/teradata-driver "1.0.0-teradata-jdbc-16.00"
+(defproject metabase/teradata-driver "1.0.0-teradata-jdbc-16.20"
   :min-lein-version "2.5.0"
 
   :profiles
