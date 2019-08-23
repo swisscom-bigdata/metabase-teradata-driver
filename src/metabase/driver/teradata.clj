@@ -236,7 +236,12 @@
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
 
-(defmethod driver/date-add :teradata [_ dt amount unit]
-  (if (>= amount 0)
-    (hx/+ (hx/->timestamp dt) (hsql/raw (format "INTERVAL '%d' %s" (int amount) (name unit))))
-    (hx/- (hx/->timestamp dt) (hsql/raw (format "INTERVAL '%d' %s" (Math/abs (int amount)) (name unit))))))
+(defmethod driver/date-add :teradata
+  [_ dt amount unit]
+  (let [amount (int amount)
+        unit (name unit)
+        abs-amount (Math/abs amount)
+        qp (if (= unit "week")
+             {:a (* abs-amount 7) :u "day"}
+             {:a abs-amount :u unit})]
+    ((if (>= amount 0) hx/+ hx/-) (hx/->timestamp dt) (hsql/raw (format "INTERVAL '%d' %s" (int (qp :a)) (name (qp :u)))))))
