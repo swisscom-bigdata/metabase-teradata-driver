@@ -155,6 +155,21 @@
 (defmethod sql.qp/date [:teradata :quarter-of-year] [_ _ expr] (hx// (hx/+ (sql.qp/date :month-of-year (sql.qp/date :quarter expr)) 2) 3))
 (defmethod sql.qp/date [:teradata :year]            [_ _ expr] (extract-integer :year expr))
 
+(defn- num-to-interval [unit amount]
+  (hsql/raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
+
+(defmethod driver/date-add :teradata [_ dt amount unit]
+  (let [op (if (>= amount 0) hx/+ hx/-)]
+    (op (hx/->timestamp dt) (case unit
+                              :second  (num-to-interval :second amount)
+                              :minute  (num-to-interval :minute amount)
+                              :hour    (num-to-interval :hour   amount)
+                              :day     (num-to-interval :day    amount)
+                              :week    (num-to-interval :day    (hx/* amount (hsql/raw 7)))
+                              :month   (num-to-interval :month  amount)
+                              :quarter (num-to-interval :month  (hx/* amount (hsql/raw 3)))
+                              :year    (num-to-interval :year   amount)))))
+
 (defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
   (hsql/call :to_timestamp field-or-value))
 
@@ -235,8 +250,3 @@
 
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
-
-(defmethod driver/date-add :teradata [_ dt amount unit]
-  (if (>= amount 0)
-    (hx/+ (hx/->timestamp dt) (hsql/raw (format "INTERVAL '%d' %s" (int amount) (name unit))))
-    (hx/- (hx/->timestamp dt) (hsql/raw (format "INTERVAL '%d' %s" (Math/abs (int amount)) (name unit))))))
