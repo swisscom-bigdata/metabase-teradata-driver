@@ -165,9 +165,9 @@
                               :minute  (num-to-interval :minute amount)
                               :hour    (num-to-interval :hour   amount)
                               :day     (num-to-interval :day    amount)
-                              :week    (num-to-interval :day    (hx/* amount (hsql/raw 7)))
+                              :week    (num-to-interval :day    (* amount 7))
                               :month   (num-to-interval :month  amount)
-                              :quarter (num-to-interval :month  (hx/* amount (hsql/raw 3)))
+                              :quarter (num-to-interval :month  (* amount 3))
                               :year    (num-to-interval :year   amount)))))
 
 (defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
