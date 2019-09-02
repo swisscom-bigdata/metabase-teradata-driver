@@ -123,7 +123,7 @@
 (defn- date-trunc [unit expr] (hsql/call :trunc expr (hx/literal unit)))
 
 (defn- timestamp-trunc [unit expr] (hsql/call :to_timestamp
-                                              (hsql/call :to_char 
+                                              (hsql/call :to_char
                                                          expr
                                                          unit) unit))
 
@@ -160,7 +160,7 @@
 
 (defmethod driver/date-add :teradata [_ dt amount unit]
   (let [op (if (>= amount 0) hx/+ hx/-)]
-    (op (hx/->timestamp dt) (case unit
+    (op (date-trunc unit dt) (case unit
                               :second  (num-to-interval :second amount)
                               :minute  (num-to-interval :minute amount)
                               :hour    (num-to-interval :hour   amount)
