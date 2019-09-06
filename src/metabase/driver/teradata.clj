@@ -160,15 +160,19 @@
 
 (defmethod driver/date-add :teradata [_ dt amount unit]
   (let [op (if (>= amount 0) hx/+ hx/-)]
-    (op (date-trunc unit dt) (case unit
-                              :second  (num-to-interval :second amount)
-                              :minute  (num-to-interval :minute amount)
-                              :hour    (num-to-interval :hour   amount)
-                              :day     (num-to-interval :day    amount)
-                              :week    (num-to-interval :day    (* amount 7))
-                              :month   (num-to-interval :month  amount)
-                              :quarter (num-to-interval :month  (* amount 3))
-                              :year    (num-to-interval :year   amount)))))
+    (op (if
+          (= unit :month)
+          (date-trunc :month dt)
+          (hx/->timestamp dt))
+        (case unit
+          :second  (num-to-interval :second amount)
+          :minute  (num-to-interval :minute amount)
+          :hour    (num-to-interval :hour   amount)
+          :day     (num-to-interval :day    amount)
+          :week    (num-to-interval :day    (* amount 7))
+          :month   (num-to-interval :month  amount)
+          :quarter (num-to-interval :month  (* amount 3))
+          :year    (num-to-interval :year   amount)))))
 
 (defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
   (hsql/call :to_timestamp field-or-value))
