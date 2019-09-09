@@ -123,7 +123,7 @@
 (defn- date-trunc [unit expr] (hsql/call :trunc expr (hx/literal unit)))
 
 (defn- timestamp-trunc [unit expr] (hsql/call :to_timestamp
-                                              (hsql/call :to_char 
+                                              (hsql/call :to_char
                                                          expr
                                                          unit) unit))
 
@@ -160,15 +160,19 @@
 
 (defmethod driver/date-add :teradata [_ dt amount unit]
   (let [op (if (>= amount 0) hx/+ hx/-)]
-    (op (hx/->timestamp dt) (case unit
-                              :second  (num-to-interval :second amount)
-                              :minute  (num-to-interval :minute amount)
-                              :hour    (num-to-interval :hour   amount)
-                              :day     (num-to-interval :day    amount)
-                              :week    (num-to-interval :day    (hx/* amount (hsql/raw 7)))
-                              :month   (num-to-interval :month  amount)
-                              :quarter (num-to-interval :month  (hx/* amount (hsql/raw 3)))
-                              :year    (num-to-interval :year   amount)))))
+    (op (if
+          (= unit :month)
+          (date-trunc :month dt)
+          (hx/->timestamp dt))
+        (case unit
+          :second  (num-to-interval :second amount)
+          :minute  (num-to-interval :minute amount)
+          :hour    (num-to-interval :hour   amount)
+          :day     (num-to-interval :day    amount)
+          :week    (num-to-interval :day    (* amount 7))
+          :month   (num-to-interval :month  amount)
+          :quarter (num-to-interval :month  (* amount 3))
+          :year    (num-to-interval :year   amount)))))
 
 (defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
   (hsql/call :to_timestamp field-or-value))

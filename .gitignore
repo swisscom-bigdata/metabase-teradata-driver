@@ -5,3 +5,6 @@
 /bin
 .classpath
 .project
+.idea
+teradata-driver.iml
+.lein-repl-history
