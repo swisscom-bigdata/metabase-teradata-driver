@@ -141,10 +141,10 @@
 (defmethod sql.qp/date [:teradata :hour]            [_ _ expr] (timestamp-trunc (hsql/raw "'yyyy-mm-dd hh24'") expr))
 (defmethod sql.qp/date [:teradata :hour-of-day]     [_ _ expr] (extract-integer :hour expr))
 (defmethod sql.qp/date [:teradata :day]             [_ _ expr] (hx/->date expr))
-(defmethod sql.qp/date [:teradata :day-of-week]     [_ _ expr] (hx/inc (hx/- (sql.qp/date :day expr)
-                                                                             (sql.qp/date :week expr))))
+(defmethod sql.qp/date [:teradata :day-of-week]     [driver _ expr] (hx/inc (hx/- (sql.qp/date driver :day expr)
+                                                                             (sql.qp/date driver :week expr))))
 (defmethod sql.qp/date [:teradata :day-of-month]    [_ _ expr] (extract-integer :day expr))
-(defmethod sql.qp/date [:teradata :day-of-year]     [_ _ expr] (hx/inc (hx/- (sql.qp/date :day expr) (date-trunc :year expr))))
+(defmethod sql.qp/date [:teradata :day-of-year]     [driver _ expr] (hx/inc (hx/- (sql.qp/date driver :day expr) (date-trunc :year expr))))
 (defmethod sql.qp/date [:teradata :week]            [_ _ expr] (date-trunc :day expr)) ; Same behaviour as with Oracle.
 (defmethod sql.qp/date [:teradata :week-of-year]    [_ _ expr] (hx/inc (hx// (hx/- (date-trunc :iw expr)
                                                                                    (date-trunc :iy expr))
@@ -152,7 +152,7 @@
 (defmethod sql.qp/date [:teradata :month]           [_ _ expr] (date-trunc :mm expr))
 (defmethod sql.qp/date [:teradata :month-of-year]   [_ _ expr] (extract-integer :month expr))
 (defmethod sql.qp/date [:teradata :quarter]         [_ _ expr] (date-trunc :q expr))
-(defmethod sql.qp/date [:teradata :quarter-of-year] [_ _ expr] (hx// (hx/+ (sql.qp/date :month-of-year (sql.qp/date :quarter expr)) 2) 3))
+(defmethod sql.qp/date [:teradata :quarter-of-year] [driver _ expr] (hx// (hx/+ (sql.qp/date driver :month-of-year (sql.qp/date driver :quarter expr)) 2) 3))
 (defmethod sql.qp/date [:teradata :year]            [_ _ expr] (extract-integer :year expr))
 
 (defn- num-to-interval [unit amount]

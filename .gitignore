@@ -6,5 +6,6 @@
 .classpath
 .project
 .idea
+*.iml
 teradata-driver.iml
 .lein-repl-history
