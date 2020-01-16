@@ -19,7 +19,8 @@
             [metabase.util
              [honeysql-extensions :as hx]
              [ssh :as ssh]])
-  (:import [java.sql DatabaseMetaData ResultSet]))
+  (:import [java.sql DatabaseMetaData ResultSet ResultSetMetaData Time Types]
+           [java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime]))
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
@@ -60,9 +61,8 @@
     :SMALLINT      :type/Integer
     :SMALLSERIAL   :type/Integer
     :TIME          :type/Time
-    :TIMETZ        :type/Time
+    (keyword "TIME WITH TIME ZONE")        :type/Time
     :TIMESTAMP     :type/DateTime
-    :TIMESTAMPTZ   :type/DateTime
     (keyword "TIMESTAMP WITH TIME ZONE") :type/DateTime
     :TSQUERY       :type/*
     :TSVECTOR      :type/*
@@ -228,19 +228,44 @@
   (jdbc/with-db-metadata [metadata (sql-jdbc.conn/db->pooled-connection-spec database)]
     {:tables (fast-active-tables, driver, ^DatabaseMetaData metadata, database)}))
 
+;; We can't use getObject(int, Class) as the underlying Resultset used by the Teradata jdbc driver is based on jdk6.
+(defmethod sql-jdbc.execute/read-column [:teradata Types/TIMESTAMP]
+           [_ _ rs _ i]
+           (.toLocalDateTime (.getTimestamp rs i)))
+
+(defmethod sql-jdbc.execute/read-column [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
+           [_ _ rs _ i]
+           (OffsetDateTime/parse (.getString rs i)))
+
+(defmethod sql-jdbc.execute/read-column [:teradata Types/DATE]
+           [_ _ rs _ i]
+           (.toLocalDate (.getDate rs i)))
+
+(defmethod sql-jdbc.execute/read-column [:teradata Types/TIME]
+           [_ _ rs _ i]
+           (.toLocalTime (.getTime rs i)))
+
+(defmethod sql-jdbc.execute/read-column [:teradata Types/TIME_WITH_TIMEZONE]
+           [_ _ rs _ i]
+           (OffsetTime/parse (.getTime rs i)))
+
 (defn- run-query
   "Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
    Setting connection attributes like timezone would make subsequent queries behave unexpectedly."
-  [{sql :query, params :params, remark :remark} timezone connection]
-  (let [sql              (s/replace (s/replace (str "-- " remark "\n" sql) "OFFSET" "") "test_data" "test-data") ;; temporary hack
-        statement        (into [sql] params)
-        [columns & rows] (jdbc/query connection statement {:identifiers    identity, :as-arrays? true
-                                                           :read-columns   (#'metabase.driver.sql-jdbc.execute/read-columns :teradata timezone)})]
+  [{sql :query, :keys [params remark max-rows]} connection]
+  (let [sql              (s/replace (str "-- " remark "\n" sql) "OFFSET" "")
+        [columns & rows] (jdbc/query
+                          connection (into [sql] params)
+                          {:identifiers    identity
+                           :as-arrays?     true
+                           :read-columns   (partial #'metabase.driver.sql-jdbc.execute/read-columns :teradata)
+                           :set-parameters (partial #'metabase.driver.sql-jdbc.execute/set-parameters :teradata)
+                           :max-rows       max-rows})]
     {:rows    (or rows [])
-     :columns columns}))
+     :columns (map u/qualified-name columns)}))
 
 (defn- run-query-without-timezone [driver settings connection query]
-  (#'metabase.driver.sql-jdbc.execute/do-in-transaction connection (partial run-query query nil)))
+  (#'metabase.driver.sql-jdbc.execute/do-in-transaction connection (partial run-query query)))
 
 (defmethod driver/execute-query :teradata
   [driver {:keys [database settings], query :native, :as outer-query}]
