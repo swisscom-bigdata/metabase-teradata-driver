@@ -18,10 +18,9 @@
             [metabase.query-processor.util :as qputil]
             [metabase.util
              [honeysql-extensions :as hx]])
-  (:import [java.sql DatabaseMetaData ResultSet Types]
+  (:import [java.sql DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
-           [java.util Calendar TimeZone]
-           [java.sql PreparedStatement]))
+           [java.util Calendar TimeZone]))
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
