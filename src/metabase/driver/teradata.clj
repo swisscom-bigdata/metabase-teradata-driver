@@ -4,6 +4,7 @@
              [string :as s]]
             [clojure.java.jdbc :as jdbc]
             [honeysql.core :as hsql]
+            [java-time :as t]
             [metabase
              [driver :as driver]
              [util :as u]]
@@ -14,13 +15,12 @@
              [sync :as sql-jdbc.sync]]
             [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
-            [metabase.models.field :as field]
             [metabase.query-processor.util :as qputil]
             [metabase.util
-             [honeysql-extensions :as hx]
-             [ssh :as ssh]])
-  (:import [java.sql DatabaseMetaData ResultSet ResultSetMetaData Time Types]
-           [java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime]))
+             [honeysql-extensions :as hx]])
+  (:import [java.sql DatabaseMetaData ResultSet Types PreparedStatement]
+           [java.time OffsetDateTime OffsetTime]
+           [java.util Calendar TimeZone]))
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
@@ -248,6 +248,13 @@
 (defmethod sql-jdbc.execute/read-column [:teradata Types/TIME_WITH_TIMEZONE]
            [_ _ rs _ i]
            (OffsetTime/parse (.getTime rs i)))
+
+;; TODO: use metabase.driver.sql-jdbc.execute.legacy-impl instead of re-implementing everything here
+(defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
+  [_ ^PreparedStatement ps ^Integer i t]
+  (let [cal (Calendar/getInstance (TimeZone/getTimeZone (t/zone-id t)))
+        t   (t/sql-timestamp t)]
+    (.setTimestamp ps i t cal)))
 
 (defn- run-query
   "Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
