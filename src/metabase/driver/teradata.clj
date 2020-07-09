@@ -2,6 +2,7 @@
   (:require [clojure
              [set :as set]
              [string :as s]]
+            [clojure.tools.logging :as log]
             [clojure.java.jdbc :as jdbc]
             [honeysql.core :as hsql]
             [java-time :as t]
@@ -17,7 +18,8 @@
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
             [metabase.query-processor.util :as qputil]
             [metabase.util
-             [honeysql-extensions :as hx]])
+             [honeysql-extensions :as hx]
+             [i18n :refer [trs]]])
   (:import [java.sql DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
@@ -229,25 +231,30 @@
     {:tables (fast-active-tables, driver, ^DatabaseMetaData metadata, database)}))
 
 ;; We can't use getObject(int, Class) as the underlying Resultset used by the Teradata jdbc driver is based on jdk6.
-(defmethod sql-jdbc.execute/read-column [:teradata Types/TIMESTAMP]
-           [_ _ rs _ i]
-           (.toLocalDateTime (.getTimestamp rs i)))
+(defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP]
+  [_ rs _ i]
+  (fn []
+    (.toLocalDateTime (.getTimestamp rs i))))
 
-(defmethod sql-jdbc.execute/read-column [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
-           [_ _ rs _ i]
-           (OffsetDateTime/parse (.getString rs i)))
+(defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
+  [_ rs _ i]
+  (fn []
+    (OffsetDateTime/parse (.getString rs i))))
 
-(defmethod sql-jdbc.execute/read-column [:teradata Types/DATE]
-           [_ _ rs _ i]
-           (.toLocalDate (.getDate rs i)))
+(defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/DATE]
+  [_ rs _ i]
+  (fn []
+    (.toLocalDate (.getDate rs i))))
 
-(defmethod sql-jdbc.execute/read-column [:teradata Types/TIME]
-           [_ _ rs _ i]
-           (.toLocalTime (.getTime rs i)))
+(defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME]
+  [_ rs _ i]
+  (fn []
+    (.toLocalTime (.getTime rs i))))
 
-(defmethod sql-jdbc.execute/read-column [:teradata Types/TIME_WITH_TIMEZONE]
-           [_ _ rs _ i]
-           (OffsetTime/parse (.getTime rs i)))
+(defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME_WITH_TIMEZONE]
+  [_ rs _ i]
+  (fn []
+    (OffsetTime/parse (.getTime rs i))))
 
 ;; TODO: use metabase.driver.sql-jdbc.execute.legacy-impl instead of re-implementing everything here
 (defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
@@ -256,31 +263,34 @@
         t   (t/sql-timestamp t)]
     (.setTimestamp ps i t cal)))
 
-(defn- run-query
-  "Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
-   Setting connection attributes like timezone would make subsequent queries behave unexpectedly."
-  [{sql :query, :keys [params remark max-rows]} connection]
-  (let [sql              (s/replace (str "-- " remark "\n" sql) "OFFSET" "")
-        [columns & rows] (jdbc/query
-                          connection (into [sql] params)
-                          {:identifiers    identity
-                           :as-arrays?     true
-                           :read-columns   (partial #'metabase.driver.sql-jdbc.execute/read-columns :teradata)
-                           :set-parameters (partial #'metabase.driver.sql-jdbc.execute/set-parameters :teradata)
-                           :max-rows       max-rows})]
-    {:rows    (or rows [])
-     :columns (map u/qualified-name columns)}))
+;; Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
+;; Setting connection attributes like timezone would make subsequent queries behave unexpectedly.
+(defmethod sql-jdbc.execute/connection-with-timezone :teradata
+  [driver database ^String timezone-id]
+  (let [conn (.getConnection (sql-jdbc.execute/datasource database))]
+    (try
+      (sql-jdbc.execute/set-best-transaction-level! driver conn)
+      (try
+        (.setReadOnly conn true)
+        (catch Throwable e
+          (log/debug e (trs "Error setting connection to read-only"))))
+      (try
+        (.setHoldability conn ResultSet/CLOSE_CURSORS_AT_COMMIT)
+        (catch Throwable e
+          (log/debug e (trs "Error setting default holdability for connection"))))
+      conn
+      (catch Throwable e
+        (.close conn)
+        (throw e)))))
 
-(defn- run-query-without-timezone [driver settings connection query]
-  (#'metabase.driver.sql-jdbc.execute/do-in-transaction connection (partial run-query query)))
+(defn- cleanup-query
+  "Remove the OFFSET keyword."
+  [query]
+  (update-in query [:native :query] (fn [value] (s/replace value "OFFSET" ""))))
 
-(defmethod driver/execute-query :teradata
-  [driver {:keys [database settings], query :native, :as outer-query}]
-  (let [query (assoc query :remark (qputil/query->remark outer-query))]
-    (#'metabase.driver.sql-jdbc.execute/do-with-try-catch
-      (fn []
-        (let [db-connection (sql-jdbc.conn/db->pooled-connection-spec database)]
-          (run-query-without-timezone driver settings db-connection query))))))
+(defmethod driver/execute-reducible-query :teradata
+  [driver query context respond]
+  ((get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond))
 
 (defmethod sql.qp/current-datetime-fn :teradata [_] now)
 
