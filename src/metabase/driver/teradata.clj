@@ -160,12 +160,12 @@
 (defn- num-to-interval [unit amount]
   (hsql/raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
 
-(defmethod driver/date-add :teradata [_ dt amount unit]
+(defmethod sql.qp/add-interval-honeysql-form :teradata [_ hsql-form amount unit]
   (let [op (if (>= amount 0) hx/+ hx/-)]
     (op (if
           (= unit :month)
-          (date-trunc :month dt)
-          (hx/->timestamp dt))
+          (date-trunc :month hsql-form)
+          (hx/->timestamp hsql-form))
         (case unit
           :second  (num-to-interval :second amount)
           :minute  (num-to-interval :minute amount)
@@ -176,11 +176,11 @@
           :quarter (num-to-interval :month  (* amount 3))
           :year    (num-to-interval :year   amount)))))
 
-(defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
+(defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds] [_ _ field-or-value]
   (hsql/call :to_timestamp field-or-value))
 
-(defmethod sql.qp/unix-timestamp->timestamp [:teradata :milliseconds] [_ _ field-or-value]
-  (sql.qp/unix-timestamp->timestamp (hx// field-or-value 1000) :seconds))
+(defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds] [_ _ field-or-value]
+  (sql.qp/unix-timestamp->honeysql (hx// field-or-value 1000) :seconds))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit] [_ _ honeysql-form {value :limit}]
   (update (assoc honeysql-form :modifiers [(format "TOP %d" value)]) :select deduplicateutil/deduplicate-identifiers))
@@ -292,7 +292,7 @@
   [driver query context respond]
   ((get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond))
 
-(defmethod sql.qp/current-datetime-fn :teradata [_] now)
+(defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
