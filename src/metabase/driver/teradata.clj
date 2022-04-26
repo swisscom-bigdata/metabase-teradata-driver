@@ -92,8 +92,8 @@
   "Create a database specification for a teradata database. Opts should include keys
   for :db, :user, and :password. You can also optionally set host and port.
   Delimiters are automatically set to \"`\"."
-  [{:keys [host port dbnames charset tmode encrypt-data]
-    :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true}
+  [{:keys [host port dbnames charset tmode encrypt-data ssl]
+    :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true, ssl false}
     :as   opts}]
   (merge {:classname   "com.teradata.jdbc.TeraDriver"
           :subprotocol "teradata"
@@ -109,14 +109,15 @@
                                     "FINALIZE_AUTO_CLOSE" "ON"
                                     ;; We don't need lob support in metabase. This also removes the limitation of 16 open statements per session which would interfere metadata crawling.
                                     "LOB_SUPPORT"         "OFF"
-                                    })
+                                    }
+                                  (if ssl
+                                    {"SSLMODE" "REQUIRE"}))
                               (map #(format "%s=%s" (first %) (second %)))
-                              (clojure.string/join ",")))
-          :delimiters  "`"}
-         (dissoc opts :host :port :dbnames :tmode :charset)))
+                              (clojure.string/join ",")))}
+         (dissoc opts :host :port :dbnames :tmode :charset :engine :ssl)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
-  [_ {ssl? :ssl, :as details-map}]
+  [_ details-map]
   (-> details-map
     teradata-spec
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
