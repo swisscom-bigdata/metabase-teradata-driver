@@ -48,7 +48,7 @@ If you are running the Docker image or you want to use another directory for plu
 
 ## Building the Teradata Driver Yourself
 
-## One time setup of metadata
+## One time setup of metabase
 
 You require metabase to be installed alongside of your project
 1. cd metadata-teradata-driver/..
