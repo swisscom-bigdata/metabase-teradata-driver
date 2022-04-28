@@ -92,8 +92,8 @@
   "Create a database specification for a teradata database. Opts should include keys
   for :db, :user, and :password. You can also optionally set host and port.
   Delimiters are automatically set to \"`\"."
-  [{:keys [host port dbnames charset tmode encrypt-data]
-    :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true}
+  [{:keys [host port dbnames charset tmode encrypt-data ssl]
+    :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true, ssl false}
     :as   opts}]
   (merge {:classname   "com.teradata.jdbc.TeraDriver"
           :subprotocol "teradata"
@@ -109,14 +109,15 @@
                                     "FINALIZE_AUTO_CLOSE" "ON"
                                     ;; We don't need lob support in metabase. This also removes the limitation of 16 open statements per session which would interfere metadata crawling.
                                     "LOB_SUPPORT"         "OFF"
-                                    })
+                                    }
+                                  (if ssl
+                                    {"SSLMODE" "REQUIRE"}))
                               (map #(format "%s=%s" (first %) (second %)))
-                              (clojure.string/join ",")))
-          :delimiters  "`"}
-         (dissoc opts :host :port :dbnames :tmode :charset)))
+                              (clojure.string/join ",")))}
+         (dissoc opts :host :port :dbnames :tmode :charset :engine :ssl)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
-  [_ {ssl? :ssl, :as details-map}]
+  [_ details-map]
   (-> details-map
     teradata-spec
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
@@ -160,12 +161,12 @@
 (defn- num-to-interval [unit amount]
   (hsql/raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
 
-(defmethod driver/date-add :teradata [_ dt amount unit]
+(defmethod sql.qp/add-interval-honeysql-form :teradata [_ hsql-form amount unit]
   (let [op (if (>= amount 0) hx/+ hx/-)]
     (op (if
           (= unit :month)
-          (date-trunc :month dt)
-          (hx/->timestamp dt))
+          (date-trunc :month hsql-form)
+          (hx/->timestamp hsql-form))
         (case unit
           :second  (num-to-interval :second amount)
           :minute  (num-to-interval :minute amount)
@@ -176,11 +177,11 @@
           :quarter (num-to-interval :month  (* amount 3))
           :year    (num-to-interval :year   amount)))))
 
-(defmethod sql.qp/unix-timestamp->timestamp [:teradata :seconds] [_ _ field-or-value]
+(defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds] [_ _ field-or-value]
   (hsql/call :to_timestamp field-or-value))
 
-(defmethod sql.qp/unix-timestamp->timestamp [:teradata :milliseconds] [_ _ field-or-value]
-  (sql.qp/unix-timestamp->timestamp (hx// field-or-value 1000) :seconds))
+(defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds] [_ _ field-or-value]
+  (sql.qp/unix-timestamp->honeysql (hx// field-or-value 1000) :seconds))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit] [_ _ honeysql-form {value :limit}]
   (update (assoc honeysql-form :modifiers [(format "TOP %d" value)]) :select deduplicateutil/deduplicate-identifiers))
@@ -307,7 +308,7 @@
   [driver query context respond]
   ((get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond))
 
-(defmethod sql.qp/current-datetime-fn :teradata [_] now)
+(defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
