@@ -235,27 +235,42 @@
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP]
   [_ rs _ i]
   (fn []
-    (.toLocalDateTime (.getTimestamp rs i))))
-
+    (let [dateVal (.getTimestamp rs i)]
+      (if (nil? dateVal)
+          nil
+          (.toLocalDateTime dateVal)))))
+  
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (OffsetDateTime/parse (.getString rs i))))
+    (let [dateVal (.getString rs i)]
+      (if (nil? dateVal)
+          nil
+          (OffsetDateTime/parse dateVal)))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/DATE]
   [_ rs _ i]
   (fn []
-    (.toLocalDate (.getDate rs i))))
+    (let [dateVal (.getDate rs i)]
+      (if (nil? dateVal)
+          nil
+          (.toLocalDate dateVal)))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME]
   [_ rs _ i]
   (fn []
-    (.toLocalTime (.getTime rs i))))
-
+    (let [dateVal (.getTime rs i)]
+      (if (nil? dateVal)
+          nil
+          (.toLocalTime dateVal)))))
+  
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (OffsetTime/parse (.getTime rs i))))
+    (let [dateVal (.getTime rs i)]
+      (if (nil? dateVal)
+          nil
+          (OffsetTime/parse dateVal)))))
 
 ;; TODO: use metabase.driver.sql-jdbc.execute.legacy-impl instead of re-implementing everything here
 (defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
