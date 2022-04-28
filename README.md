@@ -50,19 +50,19 @@ If you are running the Docker image or you want to use another directory for plu
 
 ## Building the Teradata Driver Yourself
 
-### Prereqs: Install Metabase locally, compiled for building drivers
+## One time setup of metdata
 
-```bash
-cd /path/to/metabase/source
-lein install-for-building-drivers
-```
+You require metabase to be installed alongside of your project
+1. cd metadata-teradata-driver/..
+2. git clone https://github.com/metabase/metabase
+3. cd metabase
+4. clojure -X:deps prep
+5. cd modules/driver
+6. clojure -X:deps prep
+7. cd ../../../metadata-teradata-driver
 
-### Build it
+## Build
+1. modify :paths in deps.edn, make them absolute
+2. clojure -X:build
 
-```bash
-cd /path/to/teradata-driver
-lein clean
-DEBUG=1 LEIN_SNAPSHOTS_IN_RELEASE=true lein uberjar
-```
-
-This will build a file called `target/uberjar/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.
+This will build a file called `target/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.

@@ -9,3 +9,4 @@
 *.iml
 teradata-driver.iml
 .lein-repl-history
+.cpcache
