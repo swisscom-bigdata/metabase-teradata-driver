@@ -235,42 +235,32 @@
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP]
   [_ rs _ i]
   (fn []
-    (let [dateVal (.getTimestamp rs i)]
-      (if (nil? dateVal)
-          nil
-          (.toLocalDateTime dateVal)))))
+    (when-let [value (.getTimestamp rs i)]
+      (.toLocalDateTime value))))
   
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (let [dateVal (.getString rs i)]
-      (if (nil? dateVal)
-          nil
-          (OffsetDateTime/parse dateVal)))))
+    (when-let [value (.getString rs i)]
+      (OffsetDateTime/parse value))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/DATE]
   [_ rs _ i]
   (fn []
-    (let [dateVal (.getDate rs i)]
-      (if (nil? dateVal)
-          nil
-          (.toLocalDate dateVal)))))
+    (when-let [value (.getDate rs i)]
+      (.toLocalDate value))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME]
   [_ rs _ i]
   (fn []
-    (let [dateVal (.getTime rs i)]
-      (if (nil? dateVal)
-          nil
-          (.toLocalTime dateVal)))))
+    (when-let [value (.getTime rs i)]
+      (.toLocalTime value))))
   
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (let [dateVal (.getTime rs i)]
-      (if (nil? dateVal)
-          nil
-          (OffsetTime/parse dateVal)))))
+    (when-let [value (.getTime rs i)]
+      (OffsetTime/parse value))))
 
 ;; TODO: use metabase.driver.sql-jdbc.execute.legacy-impl instead of re-implementing everything here
 (defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
