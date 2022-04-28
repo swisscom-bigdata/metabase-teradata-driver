@@ -235,27 +235,32 @@
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP]
   [_ rs _ i]
   (fn []
-    (.toLocalDateTime (.getTimestamp rs i))))
-
+    (when-let [value (.getTimestamp rs i)]
+      (.toLocalDateTime value))))
+  
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (OffsetDateTime/parse (.getString rs i))))
+    (when-let [value (.getString rs i)]
+      (OffsetDateTime/parse value))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/DATE]
   [_ rs _ i]
   (fn []
-    (.toLocalDate (.getDate rs i))))
+    (when-let [value (.getDate rs i)]
+      (.toLocalDate value))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME]
   [_ rs _ i]
   (fn []
-    (.toLocalTime (.getTime rs i))))
-
+    (when-let [value (.getTime rs i)]
+      (.toLocalTime value))))
+  
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
-    (OffsetTime/parse (.getTime rs i))))
+    (when-let [value (.getTime rs i)]
+      (OffsetTime/parse value))))
 
 ;; TODO: use metabase.driver.sql-jdbc.execute.legacy-impl instead of re-implementing everything here
 (defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
