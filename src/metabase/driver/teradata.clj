@@ -156,7 +156,7 @@
 (defmethod sql.qp/date [:teradata :month-of-year]   [_ _ expr] (extract-integer :month expr))
 (defmethod sql.qp/date [:teradata :quarter]         [_ _ expr] (date-trunc :q expr))
 (defmethod sql.qp/date [:teradata :quarter-of-year] [driver _ expr] (hx// (hx/+ (sql.qp/date driver :month-of-year (sql.qp/date driver :quarter expr)) 2) 3))
-(defmethod sql.qp/date [:teradata :year]            [_ _ expr] (extract-integer :year expr))
+(defmethod sql.qp/date [:teradata :year]            [_ _ expr] (date-trunc :year expr))
 
 (defn- num-to-interval [unit amount]
   (hsql/raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
