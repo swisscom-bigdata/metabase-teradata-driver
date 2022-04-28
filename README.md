@@ -32,7 +32,6 @@ For example, if you're running Metabase from a directory called `/app/`, you sho
 # example directory structure for running Metabase with Teradata support
 /app/metabase.jar
 /app/plugins/teradata.metabase-driver.jar
-/app/plugins/tdgssconfig.jar
 /app/plugins/terajdbc4.jar
 ```
 
@@ -41,7 +40,6 @@ If you're running Metabase from the Mac App, the plugins directory defaults to `
 ```bash
 # example directory structure for running Metabase Mac App with Teradata support
 /Users/you/Library/Application Support/Metabase/Plugins/teradata.metabase-driver.jar
-/Users/you/Library/Application Support/Metabase/Plugins/tdgssconfig.jar
 /Users/you/Library/Application Support/Metabase/Plugins/terajdbc4.jar
 ```
 
