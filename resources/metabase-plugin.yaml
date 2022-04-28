@@ -1,6 +1,6 @@
 info:
   name: Metabase Teradata Driver
-  version: 1.0.2-metabase-v0.42.4-teradata-jdbc-17.10
+  version: 1.0.2-metabase-v0.43.0-rc2-teradata-jdbc-17.10
   description: Allows Metabase to connect to Teradata databases. Community Supported driver.
 dependencies:
   - class: com.teradata.jdbc.TeraDriver
