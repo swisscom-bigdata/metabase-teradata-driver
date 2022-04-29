@@ -1,25 +1,28 @@
 {
   :paths [
     ; before building, you need to turn those into absolute paths
-    "src"
-    "resources"
+    "/home/robert/projects/ght/metabase-teradata-driver/src"
+    "/home/robert/projects/ght/metabase-teradata-driver/resources"
   ]
 
+  :deps {
+    org.clojure/clojure {:mvn/version "1.11.1"}
+    ; replace also the version in metabase-plugin.yaml
+    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0-rc2" :git/sha "4bac723514"}
+    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0-rc2" :git/sha "4bac723514" :deps/root "bin/build-drivers"}
+  }
+
   ; build the driver with `clojure -X:build` assumes that:
-  ; 1. the metabase repo (https://github.com/metabase/metabase) exists in ../metabase
-  ; 2. the correct tag is checked out `git checkout v...`
-  ; 3. `clojure -X:deps prep` was run in ../metabase as well as in ../metabase/modules/drivers
-  ; 4. You have turned the relative :paths above into absolute paths
+  ; 1. You have turned the relative :paths above into absolute paths
   :aliases {
-    :build {
-       ;; as soon as extra-deps supports prep-lib we can use {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.41.7" :git/sha "5d45269b16"}
-       :extra-deps {metabase/metabase-core {:local/root "../metabase"}
-                    metabase/build-drivers {:local/root "../metabase/bin/build-drivers"}}
+       :build {
        :exec-fn    build-drivers.build-driver/build-driver!
        :exec-args  {:driver      :teradata
                     :project-dir "."
                     :target-dir  "./target"}
 
     }
+    ; We don't want to include metabase nor clojure in the uber jar
+    :oss {:replace-deps  {} }
   }
 }
