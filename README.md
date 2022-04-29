@@ -52,15 +52,18 @@ If you are running the Docker image or you want to use another directory for plu
 
 You require metabase to be installed alongside of your project
 1. cd metadata-teradata-driver/..
-2. git clone https://github.com/metabase/metabase
-3. cd metabase
-4. clojure -X:deps prep
-5. cd modules/drivers
-6. clojure -X:deps prep
-7. cd ../../../metabase-teradata-driver
+2. execute 
+   ```
+   git clone https://github.com/metabase/metabase
+   cd metabase
+   clojure -X:deps prep
+   cd modules/drivers
+   clojure -X:deps prep
+   cd ../../../metabase-teradata-driver
+   ```
 
 ## Build
 1. modify :paths in deps.edn, make them absolute
-2. clojure -X:build
+2. `clojure -X:build`
 
 This will build a file called `target/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.
