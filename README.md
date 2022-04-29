@@ -57,7 +57,7 @@ You require metabase to be installed alongside of your project
 4. clojure -X:deps prep
 5. cd modules/drivers
 6. clojure -X:deps prep
-7. cd ../../../metadata-teradata-driver
+7. cd ../../../metabase-teradata-driver
 
 ## Build
 1. modify :paths in deps.edn, make them absolute
