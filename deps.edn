@@ -1,8 +1,8 @@
 {
   :paths [
     ; before building, you need to turn those into absolute paths
-    "/home/robert/projects/ght/metabase-teradata-driver/src"
-    "/home/robert/projects/ght/metabase-teradata-driver/resources"
+    "src"
+    "resources"
   ]
 
   :deps {
