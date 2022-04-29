@@ -55,7 +55,7 @@ You require metabase to be installed alongside of your project
 2. git clone https://github.com/metabase/metabase
 3. cd metabase
 4. clojure -X:deps prep
-5. cd modules/driver
+5. cd modules/drivers
 6. clojure -X:deps prep
 7. cd ../../../metadata-teradata-driver
 
