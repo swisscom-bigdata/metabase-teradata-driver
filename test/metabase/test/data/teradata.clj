@@ -19,7 +19,7 @@
 (defmethod sql.tx/field-base-type->sql-type [:teradata :type/Decimal]    [_ _] "DECIMAL")
 (defmethod sql.tx/field-base-type->sql-type [:teradata :type/Float]      [_ _] "FLOAT")
 (defmethod sql.tx/field-base-type->sql-type [:teradata :type/Integer]    [_ _] "INTEGER")
-(defmethod sql.tx/field-base-type->sql-type [:teradata :type/Text]       [_ _] "VARCHAR2(2048)")
+(defmethod sql.tx/field-base-type->sql-type [:teradata :type/Text]       [_ _] "VARCHAR(2048)")
 (defmethod sql.tx/field-base-type->sql-type [:teradata :type/Time]       [_ _] "TIME")
 
 ;; Tested using Teradata Express VM image. Set the host to the correct address if localhost does not work.
