@@ -92,7 +92,7 @@
   "Create a database specification for a teradata database. Opts should include keys
   for :db, :user, and :password. You can also optionally set host and port.
   Delimiters are automatically set to \"`\"."
-  [{:keys [host port dbnames charset tmode encrypt-data ssl]
+  [{:keys [host user password port dbnames charset tmode encrypt-data ssl additional-options]
     :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true, ssl false}
     :as   opts}]
   (merge {:classname   "com.teradata.jdbc.TeraDriver"
@@ -114,11 +114,17 @@
                                     {"SSLMODE" "REQUIRE"}))
                               (map #(format "%s=%s" (first %) (second %)))
                               (clojure.string/join ",")))}
-         (dissoc opts :host :port :dbnames :tmode :charset :engine :ssl)))
+         (dissoc opts :host :port :dbnames :tmode :charset :ssl)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
   [_ details-map]
-  (-> details-map
+  (->
+   ;; :engine, :let-user-control-scheduling and :advanced-options are part of the details-map but would lead to
+   ;; java.sql.SQLException: [Teradata JDBC Driver] [TeraJDBC 17.10.00.27] [Error 1536] [SQLState HY000] Invalid connection parameter name advanced-options
+   ;; thus we filtering the map, using only the data we are interested in teradata-spec
+   ;; (more keys might be added in the future to `default-advanced-options` => see metabase-plugin.yaml
+   ;; thus we switched from using `dissoc` to `select-keys`)
+   (select-keys details-map [:host :port :user :password :dbnames :charset :tmode :encrypt-data :ssl :additional-options])
     teradata-spec
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
 
