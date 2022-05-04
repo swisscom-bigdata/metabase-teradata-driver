@@ -8,8 +8,8 @@
   :deps {
     org.clojure/clojure {:mvn/version "1.11.1"}
     ; replace also the version in metabase-plugin.yaml
-    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0-rc2" :git/sha "4bac723514"}
-    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0-rc2" :git/sha "4bac723514" :deps/root "bin/build-drivers"}
+    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0" :git/sha "ee686fcfe5"}
+    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0" :git/sha "ee686fcfe5" :deps/root "bin/build-drivers"}
   }
 
   ; build the driver with `clojure -X:build` assumes that:
