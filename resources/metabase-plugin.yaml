@@ -20,15 +20,22 @@ driver:
     - name: dbnames
       display-name: Database name(s) (case sensitive)
       placeholder: Comma-separated list of database names
-    - name: tmode
-      display-name: Transaction mode
-      default: ANSI
     - user
     - password
     - ssl
+    - advanced-options-start
+    - name: tmode
+      display-name: Transaction mode
+      default: ANSI
+      visible-if:
+        advanced-options: true
     - merge:
         - additional-options
         - placeholder: e.g. COPLAST=OFF
+    # required in order that `Choose when syncs and scans happen` shows up in database options afterwards
+    # (during first time setup, you only see `Periodically refingerprint tables` in metabase v0.43.0
+    # the option `Choose when syncs and scans happen` only shows up later in admin -> Database -> advanced options)
+    - default-advanced-options
   connection-properties-include-tunnel-config: false
 init:
   - step: load-namespace
