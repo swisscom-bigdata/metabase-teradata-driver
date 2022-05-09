@@ -23,6 +23,10 @@ driver:
     - user
     - password
     - ssl
+    - name: encrypt-data
+      display-name: Encrypt data
+      default: true
+      type: boolean
     - advanced-options-start
     - name: tmode
       display-name: Transaction mode
