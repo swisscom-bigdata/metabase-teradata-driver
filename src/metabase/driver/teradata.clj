@@ -114,7 +114,7 @@
                                     {"SSLMODE" "REQUIRE"}))
                               (map #(format "%s=%s" (first %) (second %)))
                               (clojure.string/join ",")))}
-         (dissoc opts :host :port :dbnames :tmode :charset :ssl)))
+         (dissoc opts :host :port :dbnames :tmode :charset :ssl :encrypt-data)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
   [_ details-map]
