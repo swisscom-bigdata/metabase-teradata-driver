@@ -1,6 +1,7 @@
 {
   :paths [
-    ; before building, you need to turn those into absolute paths
+    ; in case you get the error `All dirs should be absolute`, you forgot to define an absolute project-dir like so:
+    ; clojure -X:build :project-dir "\"$(pwd)\""
     "src"
     "resources"
   ]
@@ -12,8 +13,7 @@
     metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0" :git/sha "ee686fcfe5" :deps/root "bin/build-drivers"}
   }
 
-  ; build the driver with `clojure -X:build` assumes that:
-  ; 1. You have turned the relative :paths above into absolute paths
+  ; build the driver with `clojure -X:build :project-dir "\"$(pwd)\""`
   :aliases {
        :build {
        :exec-fn    build-drivers.build-driver/build-driver!
