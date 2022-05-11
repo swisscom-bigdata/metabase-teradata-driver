@@ -64,6 +64,6 @@ You require metabase to be installed alongside of your project
 
 ## Build
 1. modify :paths in deps.edn, make them absolute
-2. `clojure -X:build`
+2. `clojure -X:build :project-dir "\"$(pwd)\""`
 
 This will build a file called `target/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.
