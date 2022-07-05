@@ -67,3 +67,35 @@ You require metabase to be installed alongside of your project
 2. `clojure -X:build :project-dir "\"$(pwd)\""`
 
 This will build a file called `target/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.
+
+
+## Tests
+
+Invoking the test-runner with `clojure -X` will call the test function with a map of arguments,
+which can be supplied either in the alias (via `:exec-args`) or on the command-line, or both.
+
+Invoke it with:
+
+```bash
+clj -X:test ...args...
+```
+
+This will scan your project's `test` directory for any tests defined
+using `clojure.test` and run them.
+
+You may also supply any of the additional command line options:
+
+```
+  :dirs - coll of directories containing tests, default= ["test"]
+  :nses - coll of namespace symbols to test
+  :patterns - coll of regex strings to match namespaces
+  :vars - coll of fully qualified symbols to run tests on
+  :includes - coll of test metadata keywords to include
+  :excludes - coll of test metadata keywords to exclude"
+```
+
+If neither :dirs or :nses is supplied, will use:
+
+```
+  :patterns [".*-test$"]
+```
