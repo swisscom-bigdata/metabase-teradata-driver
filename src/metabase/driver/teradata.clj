@@ -8,7 +8,8 @@
             [java-time :as t]
             [metabase
              [driver :as driver]
-             [util :as u]]
+             [util :as u]
+             [config :as config]]
             [metabase.driver.sql-jdbc
              [common :as sql-jdbc.common]
              [connection :as sql-jdbc.conn]
@@ -308,3 +309,25 @@
 
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
+
+;; Overridden to customise the C3P0 properties which will be used to avoid the high number of logins against Teradata
+;; https://github.com/metabase/metabase/blob/master/src/metabase/driver/sql_jdbc/connection.clj#L42
+;; https://www.mchange.com/projects/c3p0/#acquireRetryDelay
+(defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :teradata
+  [driver database]
+  {
+   ;; Set the acquireRetryDelay to 1 minute to reduce the number of logins against Teradata
+   "acquireRetryDelay"            60000 
+   "acquireIncrement"             1
+   "maxIdleTime"                  (* 3 60 60) ; 3 hours
+   "minPoolSize"                  1
+   "initialPoolSize"              1
+   "maxPoolSize"                  (or (config/config-int :mb-jdbc-data-warehouse-max-connection-pool-size) 15)
+   "testConnectionOnCheckout"     true
+   "maxIdleTimeExcessConnections" (* 5 60)
+   "dataSourceName"               (format "db-%d-%s-%s" (u/the-id database) (name driver) (->> database
+                                                                                               :details
+                                                                                               ((some-fn :db
+                                                                                                         :dbname
+                                                                                                         :sid
+                                                                                                         :catalog))))})
