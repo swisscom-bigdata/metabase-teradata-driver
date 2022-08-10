@@ -310,14 +310,14 @@
 ; TODO check if overriding apply-top-level-clause could make nested queries work
 (defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
 
-;; Overridden to customise the C3P0 properties which will be used to avoid the high number of logins against Teradata
+;; Overridden to customise the C3P0 properties which can be used to avoid the high number of logins against Teradata
+;; In case of such problem increase the value of acquireRetryDelay
 ;; https://github.com/metabase/metabase/blob/master/src/metabase/driver/sql_jdbc/connection.clj#L42
 ;; https://www.mchange.com/projects/c3p0/#acquireRetryDelay
 (defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :teradata
   [driver database]
   {
-   ;; Set the acquireRetryDelay to 1 minute to reduce the number of logins against Teradata
-   "acquireRetryDelay"            60000 
+   "acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000) 
    "acquireIncrement"             1
    "maxIdleTime"                  (* 3 60 60) ; 3 hours
    "minPoolSize"                  1
