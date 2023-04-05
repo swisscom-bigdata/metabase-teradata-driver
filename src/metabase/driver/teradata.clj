@@ -2,6 +2,7 @@
   (:require [clojure
              [set :as set]
              [string :as s]]
+              [medley.core :as m]
             [clojure.tools.logging :as log]
             [clojure.java.jdbc :as jdbc]
             [honeysql.core :as hsql]
@@ -10,18 +11,20 @@
              [driver :as driver]
              [util :as u]
              [config :as config]]
-            [metabase.driver.sql-jdbc
-             [common :as sql-jdbc.common]
-             [connection :as sql-jdbc.conn]
-             [execute :as sql-jdbc.execute]
-             [sync :as sql-jdbc.sync]]
+            [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
+            [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
+            [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+            [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
+            [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
+            [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync.interface]
+            [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
             [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
             [metabase.query-processor.util :as qputil]
             [metabase.util
              [honeysql-extensions :as hx]
              [i18n :refer [trs]]])
-  (:import [java.sql DatabaseMetaData ResultSet Types PreparedStatement]
+  (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
 
@@ -88,6 +91,88 @@
   [dbnames]
   (when dbnames
     (set (map #(s/trim %) (s/split (s/trim dbnames) #",")))))
+(defn- jdbc-fields-metadata
+  "Reducible metadata about the Fields belonging to a Table, fetching using JDBC DatabaseMetaData methods."
+  [driver ^Connection conn db-name-or-nil schema table-name]
+  (sql-jdbc.sync.common/reducible-results
+    #(.getColumns (.getMetaData conn)
+                  db-name-or-nil
+                  (some->> schema (driver/escape-entity-name-for-metadata driver))
+                  (some->> table-name (driver/escape-entity-name-for-metadata driver))
+                  nil)
+    (fn [^ResultSet rs]
+      ;; https://docs.oracle.com/javase/7/docs/api/java/sql/DatabaseMetaData.html#getColumns(java.lang.String,%20java.lang.String,%20java.lang.String,%20java.lang.String)
+      #(let [default            (.getString rs "COLUMN_DEF")
+             no-default?        (contains? #{nil "NULL" "null"} default)
+             nullable           (.getInt rs "NULLABLE")
+             not-nullable?      (= 0 nullable)
+             column-name        (.getString rs "COLUMN_NAME")
+             required?          (and no-default? not-nullable?)]
+         (merge
+           {:name                      column-name
+            :database-type             (.getString rs "TYPE_NAME")
+            :database-required         required?}
+           (when-let [remarks (.getString rs "REMARKS")]
+             (when-not (s/blank? remarks)
+               {:field-comment remarks})))))))
+
+(defn fallback-fields-metadata-from-select-query
+  "In some rare cases `:column_name` is blank (eg. SQLite's views with group by) fallback to sniffing the type from a
+  SELECT * query."
+  [driver ^Connection conn table-schema table-name]
+  ;; some DBs (:sqlite) don't actually return the correct metadata for LIMIT 0 queries
+  (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver table-schema table-name)]
+    (reify clojure.lang.IReduceInit
+      (reduce [_ rf init]
+        (with-open [stmt (sql-jdbc.sync.common/prepare-statement driver conn sql params)
+                    rs   (.executeQuery stmt)]
+          (let [metadata (.getMetaData rs)]
+            (reduce
+             ((map (fn [^Integer i]
+                     {:name          (.getColumnName metadata i)
+                      :database-type (.getColumnTypeName metadata i)})) rf)
+             init
+             (range 1 (inc (.getColumnCount metadata))))))))))
+
+(defn ^:private fields-metadata
+  [driver ^Connection conn {schema :schema, table-name :name} ^String db-name-or-nil]
+  {:pre [(instance? Connection conn) (string? table-name)]}
+  (reify clojure.lang.IReduceInit
+    (reduce [_ rf init]
+      ;; 1. Return all the Fields that come back from DatabaseMetaData that include type info.
+      ;;
+      ;; 2. Iff there are some Fields that don't have type info, concatenate
+      ;;    `fallback-fields-metadata-from-select-query`, which fetches the same Fields using a different method.
+      ;;
+      ;; 3. Filter out any duplicates between the two methods using `m/distinct-by`.
+      (let [has-fields-without-type-info? (volatile! false)
+            jdbc-metadata                 (eduction
+                                            (remove (fn [{:keys [database-type]}]
+                                                      (when (s/blank? database-type)
+                                                        (vreset! has-fields-without-type-info? true)
+                                                        true)))
+                                            (jdbc-fields-metadata driver conn db-name-or-nil schema table-name))
+            fallback-metadata             (reify clojure.lang.IReduceInit
+                                            (reduce [_ rf init]
+                                              (reduce
+                                                rf
+                                                init
+                                                (when @has-fields-without-type-info?
+                                                  (fallback-fields-metadata-from-select-query driver conn schema table-name)))))]
+        ;; VERY IMPORTANT! DO NOT REWRITE THIS TO BE LAZY! IT ONLY WORKS BECAUSE AS NORMAL-FIELDS GETS REDUCED,
+        ;; HAS-FIELDS-WITHOUT-TYPE-INFO? WILL GET SET TO TRUE IF APPLICABLE AND THEN FALLBACK-FIELDS WILL RUN WHEN
+        ;; IT'S TIME TO START EVALUATING THAT.
+        (reduce
+          ((comp cat (m/distinct-by :name)) rf)
+          init
+          [jdbc-metadata fallback-metadata])))))
+
+(defmethod sql-jdbc.describe-table/describe-table-fields :teradata
+  [driver conn table db-name-or-nil]
+  (into
+    #{}
+    (sql-jdbc.describe-table/describe-table-fields-xf driver table)
+    (fields-metadata driver conn table db-name-or-nil)))
 
 (defn- teradata-spec
   "Create a database specification for a teradata database. Opts should include keys
@@ -244,7 +329,7 @@
   (fn []
     (when-let [value (.getTimestamp rs i)]
       (.toLocalDateTime value))))
-  
+
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []
@@ -262,7 +347,7 @@
   (fn []
     (when-let [value (.getTime rs i)]
       (.toLocalTime value))))
-  
+
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIME_WITH_TIMEZONE]
   [_ rs _ i]
   (fn []

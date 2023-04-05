@@ -2,17 +2,24 @@
   :paths [
     ; in case you get the error `All dirs should be absolute`, you forgot to define an absolute project-dir like so:
     ; clojure -X:build :project-dir "\"$(pwd)\""
-    "src"
-    "resources"
+    "/home/mikel/Documents/metabase-teradata-driver2/metabase-teradata-driver/src"
+    "/home/mikel/Documents/metabase-teradata-driver2/metabase-teradata-driver/resources"
   ]
 
   :deps {
     org.clojure/clojure {:mvn/version "1.11.1"}
     expectations/clojure-test {:mvn/version "1.2.1"}
     ; replace also the version in metabase-plugin.yaml
-    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0" :git/sha "ee686fcfe5"}
-    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.43.0" :git/sha "ee686fcfe5" :deps/root "bin/build-drivers"}
+    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.45.3" :git/sha "070f57b"}
+    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.45.3" :git/sha "070f57b" :deps/root "bin/build-drivers"}
   }
+
+   ;; These are needed for the Athena and Redshift drivers in order to build them. Maven repos from subprojects do not
+ ;; get copied over -- see
+ ;; https://ask.clojure.org/index.php/10726/deps-manifest-dependencies-respect-repos-dependent-project
+ :mvn/repos
+ {"athena"   {:url "https://s3.amazonaws.com/maven-athena"}
+  "redshift" {:url "https://s3.amazonaws.com/redshift-maven-repository/release"}}
 
   ; build the driver with `clojure -X:build :project-dir "\"$(pwd)\""`
   :aliases {
