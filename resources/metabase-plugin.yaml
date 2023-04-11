@@ -37,7 +37,7 @@ driver:
         - additional-options
         - placeholder: e.g. COPLAST=OFF
     # required in order that `Choose when syncs and scans happen` shows up in database options afterwards
-    # (during first time setup, you only see `Periodically refingerprint tables` in metabase v0.45.2
+    # (during first time setup, you only see `Periodically refingerprint tables` in metabase v0.45.3
     # the option `Choose when syncs and scans happen` only shows up later in admin -> Database -> advanced options)
     - default-advanced-options
   connection-properties-include-tunnel-config: false

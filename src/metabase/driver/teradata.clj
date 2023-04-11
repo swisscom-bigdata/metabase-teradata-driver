@@ -101,7 +101,6 @@
                   (some->> table-name (driver/escape-entity-name-for-metadata driver))
                   nil)
     (fn [^ResultSet rs]
-      ;; https://docs.oracle.com/javase/7/docs/api/java/sql/DatabaseMetaData.html#getColumns(java.lang.String,%20java.lang.String,%20java.lang.String,%20java.lang.String)
       #(let [default            (.getString rs "COLUMN_DEF")
              no-default?        (contains? #{nil "NULL" "null"} default)
              nullable           (.getInt rs "NULLABLE")
@@ -120,7 +119,6 @@
   "In some rare cases `:column_name` is blank (eg. SQLite's views with group by) fallback to sniffing the type from a
   SELECT * query."
   [driver ^Connection conn table-schema table-name]
-  ;; some DBs (:sqlite) don't actually return the correct metadata for LIMIT 0 queries
   (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver table-schema table-name)]
     (reify clojure.lang.IReduceInit
       (reduce [_ rf init]

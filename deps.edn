@@ -2,8 +2,8 @@
   :paths [
     ; in case you get the error `All dirs should be absolute`, you forgot to define an absolute project-dir like so:
     ; clojure -X:build :project-dir "\"$(pwd)\""
-    "/home/mikel/Documents/metabase-teradata-driver2/metabase-teradata-driver/src"
-    "/home/mikel/Documents/metabase-teradata-driver2/metabase-teradata-driver/resources"
+    "src"
+    "resources"
   ]
 
   :deps {
