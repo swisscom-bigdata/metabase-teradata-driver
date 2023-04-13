@@ -2,10 +2,9 @@
   (:require [clojure
              [set :as set]
              [string :as s]]
-              [medley.core :as m]
+            [medley.core :as m]
             [clojure.tools.logging :as log]
             [clojure.java.jdbc :as jdbc]
-            [honeysql.core :as hsql]
             [java-time :as t]
             [metabase
              [driver :as driver]
@@ -20,64 +19,64 @@
             [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
             [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
-            [metabase.query-processor.util :as qputil]
-            [metabase.util
-             [honeysql-extensions :as hx]
-             [i18n :refer [trs]]])
-  (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
+            [metabase.util.i18n :refer [trs]]
+            [metabase.util.honey-sql-2 :as h2x]
+            [honey.sql :as sql]
+  [honey.sql.helpers :as hhelper] )
+(:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
 (defmethod sql-jdbc.sync/database-type->base-type :teradata [_ column-type]
-  ({:BIGINT        :type/BigInteger
-    :BIGSERIAL     :type/BigInteger
-    :BIT           :type/*
-    :BLOB          :type/*
-    :BOX           :type/*
-    :CHAR          :type/Text
-    :CLOB          :type/Text
-    :BYTE          :type/*
-    :BYTEINT       :type/Integer
-    :DATE          :type/Date
-    :DECIMAL       :type/Decimal
-    :FLOAT         :type/Float
-    :FLOAT4        :type/Float
-    :FLOAT8        :type/Float
-    :INTEGER       :type/Integer
-    :INT           :type/Integer
-    :INT2          :type/Integer
-    :INT4          :type/Integer
-    :INT8          :type/BigInteger
-    :INTERVAL      :type/* ; time span
-    :JSON          :type/Text
-    :LONGVARCHAR   :type/Text ; Teradata extension
-    :LSEG          :type/*
-    :MACADDR       :type/Text
-    :MONEY         :type/Decimal
-    :NUMERIC       :type/Decimal
-    :PATH          :type/*
-    :POINT         :type/*
-    :REAL          :type/Float
-    :SERIAL        :type/Integer
-    :SERIAL2       :type/Integer
-    :SERIAL4       :type/Integer
-    :SERIAL8       :type/BigInteger
-    :SMALLINT      :type/Integer
-    :SMALLSERIAL   :type/Integer
-    :TIME          :type/Time
+  ({:bigint                                :type/BigInteger
+    :BIGSERIAL                             :type/BigInteger
+    :BIT                                   :type/*
+    :BLOB                                  :type/*
+    :BOX                                   :type/*
+    :CHAR                                  :type/Text
+    :CLOB                                  :type/Text
+    :BYTE                                  :type/*
+    :BYTEINT                               :type/Integer
+    :DATE                                  :type/Date
+    :DECIMAL                               :type/Decimal
+    :FLOAT                                 :type/Float
+    :FLOAT4                                :type/Float
+    :FLOAT8                                :type/Float
+    :INTEGER                               :type/Integer
+    :INT                                   :type/Integer
+    :INT2                                  :type/Integer
+    :INT4                                  :type/Integer
+    :INT8                                  :type/BigInteger
+    :INTERVAL                              :type/*          ; time span
+    :JSON                                  :type/Text
+    :LONGVARCHAR                           :type/Text       ; Teradata extension
+    :LSEG                                  :type/*
+    :MACADDR                               :type/Text
+    :MONEY                                 :type/Decimal
+    :NUMERIC                               :type/Decimal
+    :PATH                                  :type/*
+    :POINT                                 :type/*
+    :REAL                                  :type/Float
+    :SERIAL                                :type/Integer
+    :SERIAL2                               :type/Integer
+    :SERIAL4                               :type/Integer
+    :SERIAL8                               :type/BigInteger
+    :SMALLINT                              :type/Integer
+    :SMALLSERIAL                           :type/Integer
+    :TIME                                  :type/Time
     (keyword "TIME WITH TIME ZONE")        :type/Time
-    :TIMESTAMP     :type/DateTime
-    (keyword "TIMESTAMP WITH TIME ZONE") :type/DateTime
-    :TSQUERY       :type/*
-    :TSVECTOR      :type/*
-    :TXID_SNAPSHOT :type/*
-    :UUID          :type/UUID
-    :VARBIT        :type/*
-    :VARBYTE       :type/* ; byte array
-    :VARCHAR       :type/Text
-    :XML           :type/Text
+    :TIMESTAMP                             :type/DateTime
+    (keyword "TIMESTAMP WITH TIME ZONE")   :type/DateTime
+    :TSQUERY                               :type/*
+    :TSVECTOR                              :type/*
+    :TXID_SNAPSHOT                         :type/*
+    :UUID                                  :type/UUID
+    :VARBIT                                :type/*
+    :VARBYTE                               :type/*          ; byte array
+    :VARCHAR                               :type/Text
+    :XML                                   :type/Text
     (keyword "bit varying")                :type/*
     (keyword "character varying")          :type/Text
     (keyword "double precision")           :type/Float
@@ -85,6 +84,11 @@
     (keyword "time without time zone")     :type/Time
     (keyword "timestamp with timezone")    :type/DateTime
     (keyword "timestamp without timezone") :type/DateTime}, column-type))
+
+;;; use Honey SQL 2 for :my-driver
+(defmethod sql.qp/honey-sql-version :teradata
+  [_driver]
+  2)
 
 (defn- dbnames-set
   "Transform the string of databases to a set of strings."
@@ -101,16 +105,16 @@
                   (some->> table-name (driver/escape-entity-name-for-metadata driver))
                   nil)
     (fn [^ResultSet rs]
-      #(let [default            (.getString rs "COLUMN_DEF")
-             no-default?        (contains? #{nil "NULL" "null"} default)
-             nullable           (.getInt rs "NULLABLE")
-             not-nullable?      (= 0 nullable)
-             column-name        (.getString rs "COLUMN_NAME")
-             required?          (and no-default? not-nullable?)]
+      #(let [default (.getString rs "COLUMN_DEF")
+             no-default? (contains? #{nil "NULL" "null"} default)
+             nullable (.getInt rs "NULLABLE")
+             not-nullable? (= 0 nullable)
+             column-name (.getString rs "COLUMN_NAME")
+             required? (and no-default? not-nullable?)]
          (merge
-           {:name                      column-name
-            :database-type             (.getString rs "TYPE_NAME")
-            :database-required         required?}
+           {:name              column-name
+            :database-type     (.getString rs "TYPE_NAME")
+            :database-required required?}
            (when-let [remarks (.getString rs "REMARKS")]
              (when-not (s/blank? remarks)
                {:field-comment remarks})))))))
@@ -123,14 +127,14 @@
     (reify clojure.lang.IReduceInit
       (reduce [_ rf init]
         (with-open [stmt (sql-jdbc.sync.common/prepare-statement driver conn sql params)
-                    rs   (.executeQuery stmt)]
+                    rs (.executeQuery stmt)]
           (let [metadata (.getMetaData rs)]
             (reduce
-             ((map (fn [^Integer i]
-                     {:name          (.getColumnName metadata i)
-                      :database-type (.getColumnTypeName metadata i)})) rf)
-             init
-             (range 1 (inc (.getColumnCount metadata))))))))))
+              ((map (fn [^Integer i]
+                      {:name          (.getColumnName metadata i)
+                       :database-type (.getColumnTypeName metadata i)})) rf)
+              init
+              (range 1 (inc (.getColumnCount metadata))))))))))
 
 (defn ^:private fields-metadata
   [driver ^Connection conn {schema :schema, table-name :name} ^String db-name-or-nil]
@@ -144,19 +148,19 @@
       ;;
       ;; 3. Filter out any duplicates between the two methods using `m/distinct-by`.
       (let [has-fields-without-type-info? (volatile! false)
-            jdbc-metadata                 (eduction
-                                            (remove (fn [{:keys [database-type]}]
-                                                      (when (s/blank? database-type)
-                                                        (vreset! has-fields-without-type-info? true)
-                                                        true)))
-                                            (jdbc-fields-metadata driver conn db-name-or-nil schema table-name))
-            fallback-metadata             (reify clojure.lang.IReduceInit
-                                            (reduce [_ rf init]
-                                              (reduce
-                                                rf
-                                                init
-                                                (when @has-fields-without-type-info?
-                                                  (fallback-fields-metadata-from-select-query driver conn schema table-name)))))]
+            jdbc-metadata (eduction
+                            (remove (fn [{:keys [database-type]}]
+                                      (when (s/blank? database-type)
+                                        (vreset! has-fields-without-type-info? true)
+                                        true)))
+                            (jdbc-fields-metadata driver conn db-name-or-nil schema table-name))
+            fallback-metadata (reify clojure.lang.IReduceInit
+                                (reduce [_ rf init]
+                                  (reduce
+                                    rf
+                                    init
+                                    (when @has-fields-without-type-info?
+                                      (fallback-fields-metadata-from-select-query driver conn schema table-name)))))]
         ;; VERY IMPORTANT! DO NOT REWRITE THIS TO BE LAZY! IT ONLY WORKS BECAUSE AS NORMAL-FIELDS GETS REDUCED,
         ;; HAS-FIELDS-WITHOUT-TYPE-INFO? WILL GET SET TO TRUE IF APPLICABLE AND THEN FALLBACK-FIELDS WILL RUN WHEN
         ;; IT'S TIME TO START EVALUATING THAT.
@@ -194,95 +198,94 @@
                                     ;; We don't need lob support in metabase. This also removes the limitation of 16 open statements per session which would interfere metadata crawling.
                                     "LOB_SUPPORT"         "OFF"
                                     }
-                                  (if ssl
-                                    {"SSLMODE" "REQUIRE"}))
-                              (map #(format "%s=%s" (first %) (second %)))
-                              (clojure.string/join ",")))}
+                                   (if ssl
+                                     {"SSLMODE" "REQUIRE"}))
+                                 (map #(format "%s=%s" (first %) (second %)))
+                                 (clojure.string/join ",")))}
          (dissoc opts :host :port :dbnames :tmode :charset :ssl :encrypt-data)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
   [_ details-map]
   (->
-   ;; :engine, :let-user-control-scheduling and :advanced-options are part of the details-map but would lead to
-   ;; java.sql.SQLException: [Teradata JDBC Driver] [TeraJDBC 17.10.00.27] [Error 1536] [SQLState HY000] Invalid connection parameter name advanced-options
-   ;; thus we filtering the map, using only the data we are interested in teradata-spec
-   ;; (more keys might be added in the future to `default-advanced-options` => see metabase-plugin.yaml
-   ;; thus we switched from using `dissoc` to `select-keys`)
-   (select-keys details-map [:host :port :user :password :dbnames :charset :tmode :encrypt-data :ssl :additional-options])
+    ;; :engine, :let-user-control-scheduling and :advanced-options are part of the details-map but would lead to
+    ;; java.sql.SQLException: [Teradata JDBC Driver] [TeraJDBC 17.10.00.27] [Error 1536] [SQLState HY000] Invalid connection parameter name advanced-options
+    ;; thus we filtering the map, using only the data we are interested in teradata-spec
+    ;; (more keys might be added in the future to `default-advanced-options` => see metabase-plugin.yaml
+    ;; thus we switched from using `dissoc` to `select-keys`)
+    (select-keys details-map [:host :port :user :password :dbnames :charset :tmode :encrypt-data :ssl :additional-options])
     teradata-spec
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
 
 ;; trunc always returns a date in Teradata
-(defn- date-trunc [unit expr] (hsql/call :trunc expr (hx/literal unit)))
+(defn- date-trunc [unit expr] (:date_trunc (h2x/literal unit) expr))
 
-(defn- timestamp-trunc [unit expr] (hsql/call :to_timestamp
-                                              (hsql/call :to_char
-                                                         expr
-                                                         unit) unit))
+(defn- timestamp-trunc [unit expr] (:to_timestamp (:to_char expr unit) unit))
 
-(defn- extract    [unit expr] (hsql/call :extract unit expr))
+(defn- extract [unit expr] (:extract unit expr))
 
-(def ^:private extract-integer (comp hx/->integer extract))
+(def ^:private extract-integer (comp h2x/->integer extract))
 
-(def ^:private ^:const one-day (hsql/raw "INTERVAL '1' DAY"))
+(def ^:private ^:const one-day (:raw "INTERVAL '1' DAY"))
 
-(def ^:private ^:const now (hsql/raw "CURRENT_TIMESTAMP"))
+(def ^:private ^:const now (:raw "CURRENT_TIMESTAMP"))
 
-(defmethod sql.qp/date [:teradata :default]         [_ _ expr] expr)
-(defmethod sql.qp/date [:teradata :minute]          [_ _ expr] (timestamp-trunc (hsql/raw "'yyyy-mm-dd hh24:mi'") expr))
-(defmethod sql.qp/date [:teradata :minute-of-hour]  [_ _ expr] (extract-integer :minute expr))
-(defmethod sql.qp/date [:teradata :hour]            [_ _ expr] (timestamp-trunc (hsql/raw "'yyyy-mm-dd hh24'") expr))
-(defmethod sql.qp/date [:teradata :hour-of-day]     [_ _ expr] (extract-integer :hour expr))
-(defmethod sql.qp/date [:teradata :day]             [_ _ expr] (hx/->date expr))
-(defmethod sql.qp/date [:teradata :day-of-week]     [driver _ expr] (hx/inc (hx/- (sql.qp/date driver :day expr)
-                                                                             (sql.qp/date driver :week expr))))
-(defmethod sql.qp/date [:teradata :day-of-month]    [_ _ expr] (extract-integer :day expr))
-(defmethod sql.qp/date [:teradata :day-of-year]     [driver _ expr] (hx/inc (hx/- (sql.qp/date driver :day expr) (date-trunc :year expr))))
-(defmethod sql.qp/date [:teradata :week]            [_ _ expr] (date-trunc :day expr)) ; Same behaviour as with Oracle.
-(defmethod sql.qp/date [:teradata :week-of-year]    [_ _ expr] (hx/inc (hx// (hx/- (date-trunc :iw expr)
+(defmethod sql.qp/date [:teradata :default] [_ _ expr] expr)
+(defmethod sql.qp/date [:teradata :minute] [_ _ expr] (timestamp-trunc (:raw "'yyyy-mm-dd hh24:mi'") expr))
+(defmethod sql.qp/date [:teradata :minute-of-hour] [_ _ expr] (extract-integer :minute expr))
+(defmethod sql.qp/date [:teradata :hour] [_ _ expr] (timestamp-trunc (:raw "'yyyy-mm-dd hh24'") expr))
+(defmethod sql.qp/date [:teradata :hour-of-day] [_ _ expr] (extract-integer :hour expr))
+(defmethod sql.qp/date [:teradata :day] [_ _ expr] (h2x/->date expr))
+(defmethod sql.qp/date [:teradata :day-of-week] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr)
+                                                                                (sql.qp/date driver :week expr))))
+(defmethod sql.qp/date [:teradata :day-of-month] [_ _ expr] (extract-integer :day expr))
+(defmethod sql.qp/date [:teradata :day-of-year] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr) (date-trunc :year expr))))
+(defmethod sql.qp/date [:teradata :week] [_ _ expr] (date-trunc :day expr)) ; Same behaviour as with Oracle.
+(defmethod sql.qp/date [:teradata :week-of-year] [_ _ expr] (h2x/inc (h2x// (h2x/- (date-trunc :iw expr)
                                                                                    (date-trunc :iy expr))
-                                                                             7)))
-(defmethod sql.qp/date [:teradata :month]           [_ _ expr] (date-trunc :mm expr))
-(defmethod sql.qp/date [:teradata :month-of-year]   [_ _ expr] (extract-integer :month expr))
-(defmethod sql.qp/date [:teradata :quarter]         [_ _ expr] (date-trunc :q expr))
-(defmethod sql.qp/date [:teradata :quarter-of-year] [driver _ expr] (hx// (hx/+ (sql.qp/date driver :month-of-year (sql.qp/date driver :quarter expr)) 2) 3))
-(defmethod sql.qp/date [:teradata :year]            [_ _ expr] (date-trunc :year expr))
+                                                                            7)))
+(defmethod sql.qp/date [:teradata :month] [_ _ expr] (date-trunc :mm expr))
+(defmethod sql.qp/date [:teradata :month-of-year] [_ _ expr] (extract-integer :month expr))
+(defmethod sql.qp/date [:teradata :quarter] [_ _ expr] (date-trunc :q expr))
+(defmethod sql.qp/date [:teradata :quarter-of-year] [driver _ expr] (h2x// (h2x/+ (sql.qp/date driver :month-of-year (sql.qp/date driver :quarter expr)) 2) 3))
+(defmethod sql.qp/date [:teradata :year] [_ _ expr] (date-trunc :year expr))
 
 (defn- num-to-interval [unit amount]
-  (hsql/raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
+  (:raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
 
 (defmethod sql.qp/add-interval-honeysql-form :teradata [_ hsql-form amount unit]
-  (let [op (if (>= amount 0) hx/+ hx/-)]
+  (let [op (if (>= amount 0) h2x/+ h2x/-)]
     (op (if
           (= unit :month)
           (date-trunc :month hsql-form)
-          (hx/->timestamp hsql-form))
+          (h2x/->timestamp hsql-form))
         (case unit
-          :second  (num-to-interval :second amount)
-          :minute  (num-to-interval :minute amount)
-          :hour    (num-to-interval :hour   amount)
-          :day     (num-to-interval :day    amount)
-          :week    (num-to-interval :day    (* amount 7))
-          :month   (num-to-interval :month  amount)
-          :quarter (num-to-interval :month  (* amount 3))
-          :year    (num-to-interval :year   amount)))))
+          :second (num-to-interval :second amount)
+          :minute (num-to-interval :minute amount)
+          :hour (num-to-interval :hour amount)
+          :day (num-to-interval :day amount)
+          :week (num-to-interval :day (* amount 7))
+          :month (num-to-interval :month amount)
+          :quarter (num-to-interval :month (* amount 3))
+          :year (num-to-interval :year amount)))))
 
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds] [_ _ field-or-value]
-  (hsql/call :to_timestamp field-or-value))
+  (:to_timestamp field-or-value))
 
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds] [_ _ field-or-value]
-  (sql.qp/unix-timestamp->honeysql (hx// field-or-value 1000) :seconds))
+  (sql.qp/unix-timestamp->honeysql (h2x// field-or-value 1000) :seconds))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit] [_ _ honeysql-form {value :limit}]
-  (update (assoc honeysql-form :modifiers [(format "TOP %d" value)]) :select deduplicateutil/deduplicate-identifiers))
+  (update honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
+  ;;(update honeysql-form :select  deduplicateutil/deduplicate-identifiers)
+  )
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
-  (assoc honeysql-form :offset (hsql/raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
-                                                 (first (hsql/format (select-keys honeysql-form [:order-by])
-                                                                     :allow-dashed-names? true
-                                                                     :quoting :ansi))
-                                                 (inc (* items (dec page)))
-                                                 (* items page)))))
+  (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
+                                             (first (:format (select-keys honeysql-form [:order-by])
+                                                      :allow-dashed-names? true
+                                                      :quoting :ansi))
+                                             (inc (* items (dec page)))
+                                             (* items page)))))
 
 (def excluded-schemas
   #{"SystemFe" "SYSLIB" "LockLogShredder" "Sys_Calendar" "SYSBAR" "SYSUIF"
@@ -300,16 +303,16 @@
   "Fetch a JDBC Metadata ResultSet of tables in the DB, optionally limited to ones belonging to a given schema."
   ^ResultSet [^DatabaseMetaData metadata, ^String schema-or-nil]
   (jdbc/result-set-seq (.getTables metadata nil schema-or-nil "%" ; tablePattern "%" = match all tables
-                         (into-array String ["TABLE", "VIEW", "FOREIGN TABLE"]))))
+                                   (into-array String ["TABLE", "VIEW", "FOREIGN TABLE"]))))
 
 (defn- fast-active-tables
   "Teradata, fast implementation of `fast-active-tables` to support inclusion list."
   [driver, ^DatabaseMetaData metadata, {{:keys [dbnames]} :details, :as database}]
   (let [all-schemas (set (map :table_schem (jdbc/result-set-seq (.getSchemas metadata))))
         dbs (dbnames-set dbnames)
-        schemas     (if (empty? dbs)
-                      (set/difference all-schemas excluded-schemas) ; use default exclusion list
-                      (set/intersection all-schemas dbs))] ; use defined inclusion list
+        schemas (if (empty? dbs)
+                  (set/difference all-schemas excluded-schemas) ; use default exclusion list
+                  (set/intersection all-schemas dbs))]      ; use defined inclusion list
     (set (for [schema schemas
                table-name (mapv :table_name (get-tables metadata schema))]
            {:name   table-name
@@ -319,7 +322,7 @@
 ;; which will be used to filter the schemas.
 (defmethod driver/describe-database :teradata [driver database]
   (jdbc/with-db-metadata [metadata (sql-jdbc.conn/db->pooled-connection-spec database)]
-    {:tables (fast-active-tables, driver, ^DatabaseMetaData metadata, database)}))
+                         {:tables (fast-active-tables, driver, ^DatabaseMetaData metadata, database)}))
 
 ;; We can't use getObject(int, Class) as the underlying Resultset used by the Teradata jdbc driver is based on jdk6.
 (defmethod sql-jdbc.execute/read-column-thunk [:teradata Types/TIMESTAMP]
@@ -356,7 +359,7 @@
 (defmethod sql-jdbc.execute/set-parameter [:teradata OffsetDateTime]
   [_ ^PreparedStatement ps ^Integer i t]
   (let [cal (Calendar/getInstance (TimeZone/getTimeZone (t/zone-id t)))
-        t   (t/sql-timestamp t)]
+        t (t/sql-timestamp t)]
     (.setTimestamp ps i t cal)))
 
 ;; Run the query itself without setting the timezone connection parameter as this must not be changed on a Teradata connection.
@@ -400,9 +403,9 @@
 (defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :teradata
   [driver database]
   {
-   "acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000) 
+   "acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000)
    "acquireIncrement"             1
-   "maxIdleTime"                  (* 3 60 60) ; 3 hours
+   "maxIdleTime"                  (* 3 60 60)               ; 3 hours
    "minPoolSize"                  1
    "initialPoolSize"              1
    "maxPoolSize"                  (or (config/config-int :mb-jdbc-data-warehouse-max-connection-pool-size) 15)
