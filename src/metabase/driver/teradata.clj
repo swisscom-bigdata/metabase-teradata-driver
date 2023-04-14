@@ -22,7 +22,7 @@
             [metabase.util.i18n :refer [trs]]
             [metabase.util.honey-sql-2 :as h2x]
             [honey.sql :as sql]
-  [honey.sql.helpers :as hhelper] )
+            [honey.sql.helpers :as hhelper] )
 (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
@@ -274,10 +274,10 @@
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds] [_ _ field-or-value]
   (sql.qp/unix-timestamp->honeysql (h2x// field-or-value 1000) :seconds))
 
-(defmethod sql.qp/apply-top-level-clause [:teradata :limit] [_ _ honeysql-form {value :limit}]
-  (update honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
-  ;;(update honeysql-form :select  deduplicateutil/deduplicate-identifiers)
-  )
+;;(update honeysql-form :select  deduplicateutil/deduplicate-identifiers)
+(defmethod sql.qp/apply-top-level-clause [:teradata :limit]
+  [_ _ honeysql-form {value :limit}]
+  (assoc honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
   (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
