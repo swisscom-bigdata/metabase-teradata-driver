@@ -22,8 +22,8 @@
             [metabase.util.i18n :refer [trs]]
             [metabase.util.honey-sql-2 :as h2x]
             [honey.sql :as sql]
-            [honey.sql.helpers :as hhelper] )
-(:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
+            [honey.sql.helpers :as hhelper])
+  (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
 
@@ -217,13 +217,15 @@
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
 
 ;; trunc always returns a date in Teradata
-(defn- date-trunc [unit expr] (:date_trunc (h2x/literal unit) expr))
+(defn- date-trunc [unit expr] (h2x/->date (:date_trunc (h2x/literal unit) expr)))
+
+(defn- date-trunc-test [unit expr] ((:date_trunc (h2x/literal unit) expr)))
 
 (defn- timestamp-trunc [unit expr] (:to_timestamp (:to_char expr unit) unit))
 
 (defn- extract [unit expr] (:extract unit expr))
 
-(def ^:private extract-integer (comp h2x/->integer extract))
+(def ^:private extract-integer (comp h2x/->date extract))
 
 (def ^:private ^:const one-day (:raw "INTERVAL '1' DAY"))
 
@@ -239,7 +241,7 @@
                                                                                 (sql.qp/date driver :week expr))))
 (defmethod sql.qp/date [:teradata :day-of-month] [_ _ expr] (extract-integer :day expr))
 (defmethod sql.qp/date [:teradata :day-of-year] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr) (date-trunc :year expr))))
-(defmethod sql.qp/date [:teradata :week] [_ _ expr] (date-trunc :day expr)) ; Same behaviour as with Oracle.
+(defmethod sql.qp/date [:teradata :week] [_ _ expr] (h2x/->date (date-trunc :day expr))) ; Same behaviour as with Oracle.
 (defmethod sql.qp/date [:teradata :week-of-year] [_ _ expr] (h2x/inc (h2x// (h2x/- (date-trunc :iw expr)
                                                                                    (date-trunc :iy expr))
                                                                             7)))
@@ -256,8 +258,8 @@
   (let [op (if (>= amount 0) h2x/+ h2x/-)]
     (op (if
           (= unit :month)
-          (date-trunc :month hsql-form)
-          (h2x/->timestamp hsql-form))
+          (date-trunc-test :month hsql-form)
+          (hsql-form))
         (case unit
           :second (num-to-interval :second amount)
           :minute (num-to-interval :minute amount)
@@ -277,7 +279,9 @@
 ;;(update honeysql-form :select  deduplicateutil/deduplicate-identifiers)
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit]
   [_ _ honeysql-form {value :limit}]
-  (assoc honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
+  (update honeysql-form :select deduplicateutil/deduplicate-identifiers)
+  )
+;;(assoc honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
   (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
@@ -386,10 +390,111 @@
   "Remove the OFFSET keyword."
   [query]
   (update-in query [:native :query] (fn [value] (s/replace value "OFFSET" ""))))
+;;;(update-in query [:native :query] (fn [value] (s/replace (s/replace (s/replace (s/replace value "OFFSET" "") "CAST(" "") "AS integer)" "")"AS date)" ""))))
 
 (defmethod driver/execute-reducible-query :teradata
   [driver query context respond]
-  ((get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond))
+  (
+   (get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond)
+  )
+
+(defn- num-to-ds-interval [unit v]
+  (let [v (if (number? v)
+            [:inline v]
+            v)]
+    [:numtodsinterval v (h2x/literal unit)]))
+
+(defn- num-to-ym-interval [unit v]
+  (let [v (if (number? v)
+            [:inline v]
+            v)]
+    [:numtoyminterval v (h2x/literal unit)]))
+
+(def ^:private timestamp-types
+  #{"timestamp" "timestamp with time zone" "timestamp with local time zone"})
+
+(defn- cast-to-timestamp-if-needed
+  "If `hsql-form` isn't already one of the [[timestamp-types]], cast it to `timestamp`."
+  [hsql-form]
+  (h2x/cast-unless-type-in "timestamp" timestamp-types hsql-form))
+
+(defn- cast-to-date-if-needed
+  "If `hsql-form` isn't already one of the [[timestamp-types]] *or* `date`, cast it to `date`."
+  [hsql-form]
+  (h2x/cast-unless-type-in "date" (conj timestamp-types "date") hsql-form))
+
+(defn- add-months [hsql-form amount]
+  (-> [:add_months (cast-to-date-if-needed hsql-form) amount]
+      (h2x/with-database-type-info "date")))
+
+;; (defmethod sql.qp/add-interval-honeysql-form :teradata
+;;   [driver hsql-form amount unit]
+;; use add_months() for months since Oracle will barf if you try to do something like 2022-03-31 + 3 months since
+;; June 31st doesn't exist. add_months() can figure it out tho.
+;;   (case unit
+;;     :quarter (recur driver hsql-form (* 3 amount) :month)
+;;     :month (add-months hsql-form amount)
+;;     :second (h2x/+ (cast-to-timestamp-if-needed hsql-form) (num-to-ds-interval :second amount))
+;;     :minute (h2x/+ (cast-to-timestamp-if-needed hsql-form) (num-to-ds-interval :minute amount))
+;;     :hour (h2x/+ (cast-to-timestamp-if-needed hsql-form) (num-to-ds-interval :hour amount))
+;;     :day (h2x/+ (cast-to-date-if-needed hsql-form) (num-to-ds-interval :day amount))
+;;     :week (h2x/+ (cast-to-date-if-needed hsql-form) (num-to-ds-interval :day (h2x/* amount [:inline 7])))
+;;     :year (h2x/+ (cast-to-date-if-needed hsql-form) (num-to-ym-interval :year amount))))
+
+;; (defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds]
+;;  [_driver _unit field-or-value]
+;;  (h2x/+ [:raw "timestamp '1970-01-01 00:00:00 UTC'"]
+;;         (num-to-ds-interval :second field-or-value)))
+
+;; (defmethod sql.qp/cast-temporal-string [:teradata :Coercion/ISO8601->DateTime]
+;;   [_driver _coercion-strategy expr]
+;;   [:to_timestamp expr "YYYY-MM-DD HH:mi:SS"])
+
+;; (defmethod sql.qp/cast-temporal-string [:teradata :Coercion/ISO8601->Date]
+;;   [_driver _coercion-strategy expr]
+;;   [:to_date expr "YYYY-MM-DD"])
+
+;; (defmethod sql.qp/cast-temporal-string [:teradata :Coercion/YYYYMMDDHHMMSSString->Temporal]
+;;   [_driver _coercion-strategy expr]
+;;   [:to_timestamp expr "YYYYMMDDHH24miSS"])
+
+;; (defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds]
+;;   [driver _ field-or-value]
+;;  (sql.qp/unix-timestamp->honeysql driver :seconds (h2x// field-or-value [:inline 1000])))
+
+;; (defmethod sql.qp/unix-timestamp->honeysql [:teradata :microseconds]
+;;   [driver _ field-or-value]
+;;   (sql.qp/unix-timestamp->honeysql driver :seconds (h2x// field-or-value [:inline 1000000])))
+
+;; (defmethod sql.qp/datetime-diff [:teradata :year]
+;;   [driver _unit x y]
+;;   (h2x// (sql.qp/datetime-diff driver :month x y) 12))
+
+;; (defmethod sql.qp/datetime-diff [:teradata :quarter]
+;;   [driver _unit x y]
+;;   (h2x// (sql.qp/datetime-diff driver :month x y) 3))
+
+;; (defmethod sql.qp/datetime-diff [:teradata :week]
+;;   [driver _unit x y]
+;;   (h2x// (sql.qp/datetime-diff driver :day x y) 7))
+
+;; (defn- utc-days-diff
+;;   "Calculates the number of fractional days between `x` and `y`, converting to UTC if the
+;;    args are timestamps with time zones. This is needed because some time zones don't have
+;;    24 hours in every day, which can cause incorrect results if we calculate the number of
+;;    hours, minutes, or seconds between two timestamps with naive subtraction."
+;;   [x y]
+;;   (let [x (cond-> x
+;;                   (h2x/is-of-type? x #"(?i)timestamp(\(\d\))? with time zone")
+;;                   (h2x/at-time-zone "UTC"))
+;;         y (cond-> y
+;;                   (h2x/is-of-type? y #"(?i)timestamp(\(\d\))? with time zone")
+;;                   (h2x/at-time-zone "UTC"))]
+;;     (h2x/- (h2x/->date y) (h2x/->date x))))
+
+;; (defmethod sql.qp/datetime-diff [:teradata :hour] [_driver _unit x y] (h2x/* (utc-days-diff x y) 24))
+;; (defmethod sql.qp/datetime-diff [:teradata :minute] [_driver _unit x y] (h2x/* (utc-days-diff x y) 1440))
+;; (defmethod sql.qp/datetime-diff [:teradata :second] [_driver _unit x y] (h2x/* (utc-days-diff x y) 86400))
 
 (defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
