@@ -21,8 +21,7 @@
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
             [metabase.util.i18n :refer [trs]]
             [metabase.util.honey-sql-2 :as h2x]
-            [honey.sql :as sql]
-            [honey.sql.helpers :as hhelper])
+            )
   (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
@@ -85,7 +84,6 @@
     (keyword "timestamp with timezone")    :type/DateTime
     (keyword "timestamp without timezone") :type/DateTime}, column-type))
 
-;;; use Honey SQL 2 for :my-driver
 (defmethod sql.qp/honey-sql-version :teradata
   [_driver]
   2)
@@ -268,12 +266,10 @@
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :milliseconds] [_ _ field-or-value]
   (sql.qp/unix-timestamp->honeysql (h2x// field-or-value 1000) :seconds))
 
-;;(update honeysql-form :select  deduplicateutil/deduplicate-identifiers)
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit]
   [_ _ honeysql-form {value :limit}]
   (update honeysql-form :select deduplicateutil/deduplicate-identifiers)
   )
-;;(assoc honeysql-form hhelper/select-top value deduplicateutil/deduplicate-identifiers)
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
   (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
@@ -382,7 +378,6 @@
   "Remove the OFFSET keyword."
   [query]
   (update-in query [:native :query] (fn [value] (s/replace value "OFFSET" ""))))
-;;;(update-in query [:native :query] (fn [value] (s/replace (s/replace (s/replace (s/replace value "OFFSET" "") "CAST(" "") "AS integer)" "")"AS date)" ""))))
 
 (defmethod driver/execute-reducible-query :teradata
   [driver query context respond]
