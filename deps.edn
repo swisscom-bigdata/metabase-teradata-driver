@@ -1,42 +1,27 @@
 {
-  :paths [
-    ; in case you get the error `All dirs should be absolute`, you forgot to define an absolute project-dir like so:
-    ; clojure -X:build :project-dir "\"$(pwd)\""
-    "src"
-    "resources"
-  ]
+ :paths [
+         ; in case you get the error `All dirs should be absolute`, you forgot to define an absolute project-dir like so:
+         ; clojure -X:build :project-dir "\"$(pwd)\""
+         "src"
+         "resources"
+         ]
 
-  :deps {
-    org.clojure/clojure {:mvn/version "1.11.1"}
-    expectations/clojure-test {:mvn/version "1.2.1"}
-    ; replace also the version in metabase-plugin.yaml
-    metabase/metabase-core {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.45.3" :git/sha "070f57b"}
-    metabase/build-drivers {:git/url "https://github.com/metabase/metabase.git" :git/tag "v0.45.3" :git/sha "070f57b" :deps/root "bin/build-drivers"}
-  }
+ :deps { org.clojure/core.logic {:mvn/version "1.0.0"}
+         com.github.seancorfield/honeysql {:mvn/version "2.4.1011"}
+        }
 
-   ;; These are needed for the Athena and Redshift drivers in order to build them. Maven repos from subprojects do not
+ ;; These are needed for the Athena and Redshift drivers in order to build them. Maven repos from subprojects do not
  ;; get copied over -- see
  ;; https://ask.clojure.org/index.php/10726/deps-manifest-dependencies-respect-repos-dependent-project
  :mvn/repos
  {"athena"   {:url "https://s3.amazonaws.com/maven-athena"}
   "redshift" {:url "https://s3.amazonaws.com/redshift-maven-repository/release"}}
 
-  ; build the driver with `clojure -X:build :project-dir "\"$(pwd)\""`
-  :aliases {
-       :build {
-       :exec-fn    build-drivers.build-driver/build-driver!
-       :exec-args  {:driver      :teradata
-                    :project-dir "."
-                    :target-dir  "./target"}
-
+ ; build the driver with `clojure -X:build :project-dir "\"$(pwd)\""`
+ :aliases
+    {:dev
+            {:extra-deps
+             { io.github.metabase/metabase { :git/tag "v0.46.0", :git/sha "0ca7df3" } }
+            }
     }
-    ; We don't want to include metabase nor clojure in the uber jar
-    :oss {:replace-deps  {} }
-
-    :test {:extra-paths ["test"]
-    :extra-deps {io.github.cognitect-labs/test-runner 
-                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
-    :main-opts ["-m" "cognitect.test-runner"]
-    :exec-fn cognitect.test-runner.api/test}
-  }
 }
