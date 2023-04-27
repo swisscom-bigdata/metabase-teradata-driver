@@ -213,12 +213,12 @@
     teradata-spec
     (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
 
-;; trunc always returns a date in Teradata
-(defn- date-trunc [unit expr] (-> [:trunc expr (h2x/literal unit)]))
+(defn- trunc [format-template v]
+  [:trunc v (h2x/literal format-template)])
 
-(def ^:private ^:const one-day (:raw "INTERVAL '1' DAY"))
+(def ^:private ^:const one-day [:raw "INTERVAL '1' DAY"])
 
-(def ^:private ^:const now (:raw "CURRENT_TIMESTAMP"))
+(def ^:private ^:const now [:raw "CURRENT_TIMESTAMP"])
 
 (defmethod sql.qp/date [:teradata :default] [_ _ expr] expr)
 (defmethod sql.qp/date [:teradata :minute] [_ _ expr] (:to_timestamp (:raw "'yyyy-mm-dd hh24:mi'") expr))
@@ -229,35 +229,37 @@
 (defmethod sql.qp/date [:teradata :day-of-week] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr)
                                                                                 (sql.qp/date driver :week expr))))
 (defmethod sql.qp/date [:teradata :day-of-month] [_ _ expr] [::h2x/extract :day expr])
-(defmethod sql.qp/date [:teradata :day-of-year] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr) (date-trunc :year expr))))
-(defmethod sql.qp/date [:teradata :week] [_ _ expr] (h2x/->date (date-trunc :day expr))) ; Same behaviour as with Oracle.
-(defmethod sql.qp/date [:teradata :week-of-year] [_ _ expr] (h2x/inc (h2x// (h2x/- (date-trunc :iw expr)
-                                                                                   (date-trunc :iy expr))
-                                                                             7)))
-(defmethod sql.qp/date [:teradata :month]           [_ _ expr] (date-trunc :mm expr))
-(defmethod sql.qp/date [:teradata :month-of-year]   [_ _ expr] [::h2x/extract :month expr])
-(defmethod sql.qp/date [:teradata :quarter]         [_ _ expr] (date-trunc :q expr))
+(defmethod sql.qp/date [:teradata :day-of-year] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr) (trunc :year expr))))
+(defmethod sql.qp/date [:teradata :week] [_ _ expr] (trunc :day expr)) ; Same behaviour as with Oracle.
+(defmethod sql.qp/date [:teradata :week-of-year] [_ _ expr] (h2x/inc (h2x// (h2x/- (trunc :iw expr)
+                                                                                   (trunc :iy expr))
+                                                                            7)))
+(defmethod sql.qp/date [:teradata :month] [_ _ expr] (trunc :month expr))
+(defmethod sql.qp/date [:teradata :month-of-year] [_ _ expr] [::h2x/extract :month expr])
+(defmethod sql.qp/date [:teradata :quarter] [_ _ expr] (trunc :q expr))
 (defmethod sql.qp/date [:teradata :quarter-of-year] [driver _ expr] (h2x// (h2x/+ (sql.qp/date driver :month-of-year (sql.qp/date driver :quarter expr)) 2) 3))
-(defmethod sql.qp/date [:teradata :year]            [_ _ expr] (date-trunc :year expr))
+(defmethod sql.qp/date [:teradata :year] [_ _ expr] (trunc :year expr))
 
 (defn- num-to-interval [unit amount]
-  (:raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))))
+  [:raw (format "INTERVAL '%d' %s" (int (Math/abs amount)) (name unit))])
 
 (defmethod sql.qp/add-interval-honeysql-form :teradata [_ hsql-form amount unit]
   (let [op (if (>= amount 0) h2x/+ h2x/-)]
-    (op (if
-          (= unit :month)
-          (date-trunc :month hsql-form)
-          (hsql-form))
-        (case unit
-          :second  (num-to-interval :second amount)
-          :minute  (num-to-interval :minute amount)
-          :hour    (num-to-interval :hour   amount)
-          :day     (num-to-interval :day    amount)
-          :week    (num-to-interval :day    (* amount 7))
-          :month   (num-to-interval :month  amount)
-          :quarter (num-to-interval :month  (* amount 3))
-          :year    (num-to-interval :year   amount)))))
+    (op (if (= unit :month)
+          (trunc :month hsql-form)
+          (h2x/->timestamp hsql-form))
+  (case unit
+          :second (num-to-interval :second amount)
+          :minute (num-to-interval :minute amount)
+          :hour (num-to-interval :hour amount)
+          :day (num-to-interval :day amount)
+          :week (num-to-interval :day (* amount 7))
+          :month (num-to-interval :month amount)
+          :quarter (num-to-interval :month (* amount 3))
+          :year (num-to-interval :year amount)))))
+
+(def ^:private timestamp-types
+  #{"timestamp" "timestamp with time zone" "timestamp with local time zone"})
 
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds] [_ _ field-or-value]
   (:to_timestamp field-or-value))
@@ -383,35 +385,6 @@
   (
    (get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond)
   )
-
-(defn- num-to-ds-interval [unit v]
-  (let [v (if (number? v)
-            [:inline v]
-            v)]
-    [:numtodsinterval v (h2x/literal unit)]))
-
-(defn- num-to-ym-interval [unit v]
-  (let [v (if (number? v)
-            [:inline v]
-            v)]
-    [:numtoyminterval v (h2x/literal unit)]))
-
-(def ^:private timestamp-types
-  #{"timestamp" "timestamp with time zone" "timestamp with local time zone"})
-
-(defn- cast-to-timestamp-if-needed
-  "If `hsql-form` isn't already one of the [[timestamp-types]], cast it to `timestamp`."
-  [hsql-form]
-  (h2x/cast-unless-type-in "timestamp" timestamp-types hsql-form))
-
-(defn- cast-to-date-if-needed
-  "If `hsql-form` isn't already one of the [[timestamp-types]] *or* `date`, cast it to `date`."
-  [hsql-form]
-  (h2x/cast-unless-type-in "date" (conj timestamp-types "date") hsql-form))
-
-(defn- add-months [hsql-form amount]
-  (-> [:add_months (cast-to-date-if-needed hsql-form) amount]
-      (h2x/with-database-type-info "date")))
 
 (defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
