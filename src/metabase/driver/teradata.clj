@@ -54,6 +54,7 @@
     :MACADDR       :type/Text
     :MONEY         :type/Decimal
     :NUMERIC       :type/Decimal
+    :NUMBER        :type/Decimal
     :PATH          :type/*
     :POINT         :type/*
     :REAL          :type/Float
@@ -221,9 +222,9 @@
 (def ^:private ^:const now [:raw "CURRENT_TIMESTAMP"])
 
 (defmethod sql.qp/date [:teradata :default] [_ _ expr] expr)
-(defmethod sql.qp/date [:teradata :minute] [_ _ expr] (:to_timestamp (:raw "'yyyy-mm-dd hh24:mi'") expr))
+(defmethod sql.qp/date [:teradata :minute] [_ _ expr] (:to_timestamp [:raw "'yyyy-mm-dd hh24:mi'"] expr))
 (defmethod sql.qp/date [:teradata :minute-of-hour] [_ _ expr] [::h2x/extract :minute expr])
-(defmethod sql.qp/date [:teradata :hour] [_ _ expr] (:to_timestamp (:raw "'yyyy-mm-dd hh24'") expr))
+(defmethod sql.qp/date [:teradata :hour] [_ _ expr] (:to_timestamp [:raw "'yyyy-mm-dd hh24'"] expr))
 (defmethod sql.qp/date [:teradata :hour-of-day] [_ _ expr] [::h2x/extract :hour expr])
 (defmethod sql.qp/date [:teradata :day] [_ _ expr] (h2x/->date expr))
 (defmethod sql.qp/date [:teradata :day-of-week] [driver _ expr] (h2x/inc (h2x/- (sql.qp/date driver :day expr)
@@ -269,16 +270,15 @@
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit]
   [_ _ honeysql-form {value :limit}]
-  (update honeysql-form :select deduplicateutil/deduplicate-identifiers)
-  )
+  (update honeysql-form :select deduplicateutil/deduplicate-identifiers))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
-  (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
+  (assoc honeysql-form :offset [:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
                                                  (first (format (select-keys honeysql-form [:order-by])
                                                                      :allow-dashed-names? true
                                                                      :quoting :ansi))
                                                  (inc (* items (dec page)))
-                                                 (* items page)))))
+                                                 (* items page))]))
 
 (def excluded-schemas
   #{"SystemFe" "SYSLIB" "LockLogShredder" "Sys_Calendar" "SYSBAR" "SYSUIF"
