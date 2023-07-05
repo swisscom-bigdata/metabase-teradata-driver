@@ -63,10 +63,17 @@ You require metabase to be installed alongside of your project
    ```
 
 ## Build
-1. modify :paths in deps.edn, make them absolute
-2. `clojure -X:build :project-dir "\"$(pwd)\""`
+1. under the metabase folder, check out the desired branch
+2. create a link to the right location to the driver:
+```
+DRIVER_PATH=`readlink -f /home/user/metadata-teradata-driver/`
+```
+3. 
+```
+ clojure   -Sdeps "{:aliases {:teradata {:extra-deps {com.metabase/teradata-driver {:local/root \"$DRIVER_PATH\"}}}}}"    -X:build:teradata   build-drivers.build-driver/build-driver!   "{:driver :teradata :project-dir \"$DRIVER_PATH\", :target-dir \"$DRIVER_PATH/target\"}"
+```
 
-This will build a file called `target/teradata.metabase-driver.jar`; copy this to your Metabase `./plugins` directory.
+This will build a file called `target/teradata.metabase-driver.jar` under the driver folder; copy this to your Metabase `./plugins` directory.
 
 
 ## Tests
