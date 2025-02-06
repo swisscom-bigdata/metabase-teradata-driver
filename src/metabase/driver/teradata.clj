@@ -384,9 +384,6 @@
 
 (defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
-; TODO check if overriding apply-top-level-clause could make nested queries work
-(defmethod driver/supports? [:teradata :nested-queries] [_ _] false)
-
 ;; Overridden to customise the C3P0 properties which can be used to avoid the high number of logins against Teradata
 ;; In case of such problem increase the value of acquireRetryDelay
 ;; https://github.com/metabase/metabase/blob/master/src/metabase/driver/sql_jdbc/connection.clj#L42
