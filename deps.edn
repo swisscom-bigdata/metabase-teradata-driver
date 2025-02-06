@@ -6,8 +6,8 @@
          "resources"
          ]
 
- :deps { org.clojure/core.logic {:mvn/version "1.0.0"}
-         com.github.seancorfield/honeysql {:mvn/version "2.4.1011"}
+ :deps { org.clojure/core.logic {:mvn/version "1.0.1"}
+         com.github.seancorfield/honeysql {:mvn/version "2.5.1103"}
         }
 
  ;; These are needed for the Athena and Redshift drivers in order to build them. Maven repos from subprojects do not
@@ -21,7 +21,7 @@
  :aliases
     {:dev
             {:extra-deps
-             { io.github.metabase/metabase { :git/tag "v0.48.13", :git/sha "7a5ccd8" } }
+             { io.github.metabase/metabase { :git/tag "v0.49.25", :git/sha "59ee427" } }
             }
     }
 }

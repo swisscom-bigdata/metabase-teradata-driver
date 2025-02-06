@@ -83,10 +83,6 @@
     (keyword "timestamp with timezone")    :type/DateTime
     (keyword "timestamp without timezone") :type/DateTime}, column-type))
 
-(defmethod sql.qp/honey-sql-version :teradata
-  [_driver]
-  2)
-
 (defn- dbnames-set
   "Transform the string of databases to a set of strings."
   [dbnames]
