@@ -2,6 +2,7 @@
   (:require [clojure
              [set :as set]
              [string :as s]]
+            [medley.core :as m]
             [clojure.tools.logging :as log]
             [clojure.java.jdbc :as jdbc]
             [java-time :as t]
@@ -15,15 +16,18 @@
             [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
             [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.sql.util.deduplicate :as deduplicateutil]
+            [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
+            [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
+            [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync.interface]
             [metabase.util.i18n :refer [trs]]
             [metabase.util.honey-sql-2 :as h2x])
-  (:import [java.sql DatabaseMetaData ResultSet Types PreparedStatement]
+  (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
-(doseq [[feature supported?] { :metadata/key-constraints false }]
+(doseq [[feature supported?] {:metadata/key-constraints false}]
   (defmethod driver/database-supports? [:teradata feature] [_driver _feature _db] supported?))
 
 (defmethod sql-jdbc.sync/database-type->base-type :teradata [_ column-type]
@@ -88,10 +92,89 @@
   (when dbnames
     (set (map #(s/trim %) (s/split (s/trim dbnames) #",")))))
 
+(defn- jdbc-fields-metadata
+  "Reducible metadata about the Fields belonging to a Table, fetching using JDBC DatabaseMetaData methods."
+  [driver ^Connection conn db-name-or-nil schema table-name]
+  (sql-jdbc.sync.common/reducible-results
+   #(.getColumns (.getMetaData conn)
+                 db-name-or-nil
+                 (some->> schema (driver/escape-entity-name-for-metadata driver))
+                 (some->> table-name (driver/escape-entity-name-for-metadata driver))
+                 nil)
+   (fn [^ResultSet rs]
+     #(let [default            (.getString rs "COLUMN_DEF")
+            no-default?        (contains? #{nil "NULL" "null"} default)
+            nullable           (.getInt rs "NULLABLE")
+            not-nullable?      (= 0 nullable)
+            column-name        (.getString rs "COLUMN_NAME")
+            required?          (and no-default? not-nullable?)]
+        (merge
+         {:name                      column-name
+          :database-type             (.getString rs "TYPE_NAME")
+          :database-required         required?}
+         (when-let [remarks (.getString rs "REMARKS")]
+           (when-not (s/blank? remarks)
+             {:field-comment remarks})))))))
+
+(defn fallback-fields-metadata-from-select-query
+  "In some rare cases `:column_name` is blank (eg. SQLite's views with group by) fallback to sniffing the type from a
+  SELECT * query."
+  [driver ^Connection conn table-schema table-name]
+  (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver table-schema table-name)]
+    (reify clojure.lang.IReduceInit
+      (reduce [_ rf init]
+        (with-open [stmt (sql-jdbc.sync.common/prepare-statement driver conn sql params)
+                    rs   (.executeQuery stmt)]
+          (let [metadata (.getMetaData rs)]
+            (reduce
+             ((map (fn [^Integer i]
+                     {:name          (.getColumnName metadata i)
+                      :database-type (.getColumnTypeName metadata i)})) rf)
+             init
+             (range 1 (inc (.getColumnCount metadata))))))))))
+
+(defn ^:private fields-metadata
+  [driver ^Connection conn {schema :schema, table-name :name} ^String db-name-or-nil]
+  {:pre [(instance? Connection conn) (string? table-name)]}
+  (reify clojure.lang.IReduceInit
+    (reduce [_ rf init]
+      ;; 1. Return all the Fields that come back from DatabaseMetaData that include type info.
+      ;;
+      ;; 2. Iff there are some Fields that don't have type info, concatenate
+      ;;    `fallback-fields-metadata-from-select-query`, which fetches the same Fields using a different method.
+      ;;
+      ;; 3. Filter out any duplicates between the two methods using `m/distinct-by`.
+      (let [has-fields-without-type-info? (volatile! false)
+            jdbc-metadata                 (eduction
+                                           (remove (fn [{:keys [database-type]}]
+                                                     (when (s/blank? database-type)
+                                                       (vreset! has-fields-without-type-info? true)
+                                                       true)))
+                                           (jdbc-fields-metadata driver conn db-name-or-nil schema table-name))
+            fallback-metadata             (reify clojure.lang.IReduceInit
+                                            (reduce [_ rf init]
+                                              (reduce
+                                               rf
+                                               init
+                                               (when @has-fields-without-type-info?
+                                                 (fallback-fields-metadata-from-select-query driver conn schema table-name)))))]
+        ;; VERY IMPORTANT! DO NOT REWRITE THIS TO BE LAZY! IT ONLY WORKS BECAUSE AS NORMAL-FIELDS GETS REDUCED,
+        ;; HAS-FIELDS-WITHOUT-TYPE-INFO? WILL GET SET TO TRUE IF APPLICABLE AND THEN FALLBACK-FIELDS WILL RUN WHEN
+        ;; IT'S TIME TO START EVALUATING THAT.
+        (reduce
+         ((comp cat (m/distinct-by :name)) rf)
+         init
+         [jdbc-metadata fallback-metadata])))))
+
+(defmethod sql-jdbc.describe-table/describe-table-fields :teradata
+  [driver conn table db-name-or-nil]
+  (into
+   #{}
+   (sql-jdbc.describe-table/describe-table-fields-xf driver table)
+   (fields-metadata driver conn table db-name-or-nil)))
+
 (defn- teradata-spec
-  "Create a database specification for a teradata database. Opts should include keys
-  for :db, :user, and :password. You can also optionally set host and port.
-  Delimiters are automatically set to \"`\"."
+  "Create a database specification for a Teradata database."
   [{:keys [host user password port dbnames charset tmode encrypt-data ssl additional-options]
     :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true, ssl false}
     :as   opts}]
@@ -99,21 +182,19 @@
           :subprotocol "teradata"
           :subname     (str "//" host "/"
                             (->> (merge
-                                   (when dbnames
-                                     {"DATABASE" (first (dbnames-set dbnames))})
-                                   (when port
-                                     {"DBS_PORT" port})
-                                   {"CHARSET"             charset
-                                    "TMODE"               tmode
-                                    "ENCRYPTDATA"         (if encrypt-data "ON" "OFF")
-                                    "FINALIZE_AUTO_CLOSE" "ON"
-                                    ;; We don't need lob support in metabase. This also removes the limitation of 16 open statements per session which would interfere metadata crawling.
-                                    "LOB_SUPPORT"         "OFF"
-                                    }
+                                  (when dbnames
+                                    {"DATABASE" (first (dbnames-set dbnames))})
+                                  (when port
+                                    {"DBS_PORT" port})
+                                  {"CHARSET"             charset
+                                   "TMODE"               tmode
+                                   "ENCRYPTDATA"         (if encrypt-data "ON" "OFF")
+                                   "FINALIZE_AUTO_CLOSE" "ON"
+                                   "LOB_SUPPORT"         "OFF"}
                                   (if ssl
                                     {"SSLMODE" "REQUIRE"}))
-                              (map #(format "%s=%s" (first %) (second %)))
-                              (clojure.string/join ",")))}
+                                 (map #(format "%s=%s" (first %) (second %)))
+                                 (clojure.string/join ",")))}
          (dissoc opts :host :port :dbnames :tmode :charset :ssl :encrypt-data)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
@@ -125,8 +206,8 @@
    ;; (more keys might be added in the future to `default-advanced-options` => see metabase-plugin.yaml
    ;; thus we switched from using `dissoc` to `select-keys`)
    (select-keys details-map [:host :port :user :password :dbnames :charset :tmode :encrypt-data :ssl :additional-options])
-    teradata-spec
-    (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
+   teradata-spec
+   (sql-jdbc.common/handle-additional-options details-map, :seperator-style :comma)))
 
 (defn- trunc [format-template v]
   [:trunc v (h2x/literal format-template)])
@@ -163,7 +244,7 @@
     (op (if (= unit :month)
           (trunc :month hsql-form)
           (h2x/->timestamp hsql-form))
-  (case unit
+        (case unit
           :second (num-to-interval :second amount)
           :minute (num-to-interval :minute amount)
           :hour (num-to-interval :hour amount)
@@ -184,16 +265,15 @@
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit]
   [_ _ honeysql-form {value :limit}]
-  (update honeysql-form :select deduplicateutil/deduplicate-identifiers)
-  )
+  (update honeysql-form :select deduplicateutil/deduplicate-identifiers))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
   (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
-                                                 (first (format (select-keys honeysql-form [:order-by])
-                                                                     :allow-dashed-names? true
-                                                                     :quoting :ansi))
-                                                 (inc (* items (dec page)))
-                                                 (* items page)))))
+                                             (first (format (select-keys honeysql-form [:order-by])
+                                                            :allow-dashed-names? true
+                                                            :quoting :ansi))
+                                             (inc (* items (dec page)))
+                                             (* items page)))))
 
 (def excluded-schemas
   #{"SystemFe" "SYSLIB" "LockLogShredder" "Sys_Calendar" "SYSBAR" "SYSUIF"
@@ -211,7 +291,7 @@
   "Fetch a JDBC Metadata ResultSet of tables in the DB, optionally limited to ones belonging to a given schema."
   ^ResultSet [^DatabaseMetaData metadata, ^String schema-or-nil]
   (jdbc/result-set-seq (.getTables metadata nil schema-or-nil "%" ; tablePattern "%" = match all tables
-                         (into-array String ["TABLE", "VIEW", "FOREIGN TABLE"]))))
+                                   (into-array String ["TABLE", "VIEW", "FOREIGN TABLE"]))))
 
 (defn- fast-active-tables
   "Teradata, fast implementation of `fast-active-tables` to support inclusion list."
@@ -295,9 +375,7 @@
 
 (defmethod driver/execute-reducible-query :teradata
   [driver query context respond]
-  (
-   (get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond)
-  )
+  ((get-method driver/execute-reducible-query :sql-jdbc) driver (cleanup-query query) context respond))
 
 (defmethod sql.qp/current-datetime-honeysql-form :teradata [_] now)
 
@@ -307,18 +385,20 @@
 ;; https://www.mchange.com/projects/c3p0/#acquireRetryDelay
 (defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :teradata
   [driver database]
-  {
-   "acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000) 
+  {"acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000)
    "acquireIncrement"             1
-   "maxIdleTime"                  (* 3 60 60) ; 3 hours
+   "maxIdleTime"                  (* 6 60 60) ; 6 hours
    "minPoolSize"                  1
    "initialPoolSize"              1
-   "maxPoolSize"                  (or (config/config-int :mb-jdbc-data-warehouse-max-connection-pool-size) 15)
+   "maxPoolSize"                  (or (config/config-int :mb-jdbc-data-warehouse-max-connection-pool-size) 30)
    "testConnectionOnCheckout"     true
    "maxIdleTimeExcessConnections" (* 5 60)
-   "dataSourceName"               (format "db-%d-%s-%s" (u/the-id database) (name driver) (->> database
-                                                                                               :details
-                                                                                               ((some-fn :db
-                                                                                                         :dbname
-                                                                                                         :sid
-                                                                                                         :catalog))))})
+   "checkoutTimeout"              300000 ; 300 seconds (increase this if needed)
+   "idleConnectionTestPeriod"     300   ; Test idle connections every 5 minutes
+   "maxConnectionAge"             (* 6 60 60) ; 6 hours
+   " dataSourceName "               (format " db-%d-%s-%s " (u/the-id database) (name driver) (->> database
+                                                                                                   :details
+                                                                                                   ((some-fn :db
+                                                                                                             :dbname
+                                                                                                             :sid
+                                                                                                             :catalog))))})
