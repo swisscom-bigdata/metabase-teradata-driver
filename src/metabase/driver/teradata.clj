@@ -119,8 +119,8 @@
 (defn fallback-fields-metadata-from-select-query
   "In some rare cases `:column_name` is blank (eg. SQLite's views with group by) fallback to sniffing the type from a
   SELECT * query."
-  [driver ^Connection conn table-schema table-name]
-  (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver table-schema table-name)]
+  [driver ^Connection conn db-name-or-nil table-schema table-name]
+  (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver db-name-or-nil table-schema table-name)]
     (reify clojure.lang.IReduceInit
       (reduce [_ rf init]
         (with-open [stmt (sql-jdbc.sync.common/prepare-statement driver conn sql params)
@@ -157,7 +157,7 @@
                                                rf
                                                init
                                                (when @has-fields-without-type-info?
-                                                 (fallback-fields-metadata-from-select-query driver conn schema table-name)))))]
+                                                 (fallback-fields-metadata-from-select-query driver conn db-name-or-nil schema table-name)))))]
         ;; VERY IMPORTANT! DO NOT REWRITE THIS TO BE LAZY! IT ONLY WORKS BECAUSE AS NORMAL-FIELDS GETS REDUCED,
         ;; HAS-FIELDS-WITHOUT-TYPE-INFO? WILL GET SET TO TRUE IF APPLICABLE AND THEN FALLBACK-FIELDS WILL RUN WHEN
         ;; IT'S TIME TO START EVALUATING THAT.
