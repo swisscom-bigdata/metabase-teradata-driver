@@ -350,23 +350,24 @@
         t   (t/sql-timestamp t)]
     (.setTimestamp ps i t cal)))
 
-(defmethod sql-jdbc.execute/do-with-connection-with-options :teradata
-  [driver database _options f]
-  (let [conn (.getConnection (sql-jdbc.execute/datasource database))]
-    (try
-      (sql-jdbc.execute/set-best-transaction-level! driver conn)
-      (try
-        (.setReadOnly conn true)
-        (catch Throwable e
-          (log/debug e (trs "Error setting connection to read-only"))))
-      (try
-        (.setHoldability conn ResultSet/CLOSE_CURSORS_AT_COMMIT)
-        (catch Throwable e
-          (log/debug e (trs "Error setting default holdability for connection"))))
-      (f conn) ;; Pass the connection to the provided function
-      (catch Throwable e
-        (.close conn)
-        (throw e)))))
+(defmethod sql-jdbc.execute/do-with-connection-with-options :redshift
+  [driver db-or-id-or-spec options f]
+  (sql-jdbc.execute/do-with-resolved-connection
+   driver
+   db-or-id-or-spec
+   options
+   (fn [^Connection conn]
+     (when-not (sql-jdbc.execute/recursive-connection?)
+       (sql-jdbc.execute/set-best-transaction-level! driver conn)
+       (try
+         (.setReadOnly conn true)
+         (catch Throwable e
+           (log/debug e (trs "Error setting connection to read-only"))))
+       (try
+         (.setHoldability conn ResultSet/CLOSE_CURSORS_AT_COMMIT)
+         (catch Throwable e
+           (log/debug e (trs "Error setting default holdability for connection")))))
+     (f conn))))
 
 (defn- cleanup-query
   "Remove the OFFSET keyword."
