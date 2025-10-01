@@ -31,60 +31,63 @@
   (defmethod driver/database-supports? [:teradata feature] [_driver _feature _db] supported?))
 
 (defmethod sql-jdbc.sync/database-type->base-type :teradata [_ column-type]
-  ({:BIGINT        :type/BigInteger
-    :BIGSERIAL     :type/BigInteger
-    :BIT           :type/*
-    :BLOB          :type/*
-    :BOX           :type/*
-    :CHAR          :type/Text
-    :CLOB          :type/Text
-    :BYTE          :type/*
-    :BYTEINT       :type/Integer
-    :DATE          :type/Date
-    :DECIMAL       :type/Decimal
-    :FLOAT         :type/Float
-    :FLOAT4        :type/Float
-    :FLOAT8        :type/Float
-    :INTEGER       :type/Integer
-    :INT           :type/Integer
-    :INT2          :type/Integer
-    :INT4          :type/Integer
-    :INT8          :type/BigInteger
-    :INTERVAL      :type/* ; time span
-    :JSON          :type/Text
-    :LONGVARCHAR   :type/Text ; Teradata extension
-    :LSEG          :type/*
-    :MACADDR       :type/Text
-    :MONEY         :type/Decimal
-    :NUMERIC       :type/Decimal
-    :PATH          :type/*
-    :POINT         :type/*
-    :REAL          :type/Float
-    :SERIAL        :type/Integer
-    :SERIAL2       :type/Integer
-    :SERIAL4       :type/Integer
-    :SERIAL8       :type/BigInteger
-    :SMALLINT      :type/Integer
-    :SMALLSERIAL   :type/Integer
-    :TIME          :type/Time
-    (keyword "TIME WITH TIME ZONE")        :type/Time
-    :TIMESTAMP     :type/DateTime
-    (keyword "TIMESTAMP WITH TIME ZONE") :type/DateTime
-    :TSQUERY       :type/*
-    :TSVECTOR      :type/*
-    :TXID_SNAPSHOT :type/*
-    :UUID          :type/UUID
-    :VARBIT        :type/*
-    :VARBYTE       :type/* ; byte array
-    :VARCHAR       :type/Text
-    :XML           :type/Text
-    (keyword "bit varying")                :type/*
-    (keyword "character varying")          :type/Text
-    (keyword "double precision")           :type/Float
-    (keyword "time with time zone")        :type/Time
-    (keyword "time without time zone")     :type/Time
-    (keyword "timestamp with timezone")    :type/DateTime
-    (keyword "timestamp without timezone") :type/DateTime}, column-type))
+  (let [type-mapping
+        {:BIGINT        :type/BigInteger
+         :BIGSERIAL     :type/BigInteger
+         :BIT           :type/*
+         :BLOB          :type/*
+         :BOX           :type/*
+         :CHAR          :type/Text
+         :CLOB          :type/Text
+         :BYTE          :type/*
+         :BYTEINT       :type/Integer
+         :DATE          :type/Date
+         :DECIMAL       :type/Decimal
+         :FLOAT         :type/Float
+         :FLOAT4        :type/Float
+         :FLOAT8        :type/Float
+         :INTEGER       :type/Integer
+         :INT           :type/Integer
+         :INT2          :type/Integer
+         :INT4          :type/Integer
+         :INT8          :type/BigInteger
+         :INTERVAL      :type/* ; time span
+         :JSON          :type/Text
+         :LONGVARCHAR   :type/Text ; Teradata extension
+         :LSEG          :type/*
+         :MACADDR       :type/Text
+         :MONEY         :type/Decimal
+         :NUMERIC       :type/Decimal
+         :NUMBER        :type/Decimal ; Add this mapping
+         :PATH          :type/*
+         :POINT         :type/*
+         :REAL          :type/Float
+         :SERIAL        :type/Integer
+         :SERIAL2       :type/Integer
+         :SERIAL4       :type/Integer
+         :SERIAL8       :type/BigInteger
+         :SMALLINT      :type/Integer
+         :SMALLSERIAL   :type/Integer
+         :TIME          :type/Time
+         (keyword "TIME WITH TIME ZONE")        :type/Time
+         :TIMESTAMP     :type/DateTime
+         (keyword "TIMESTAMP WITH TIME ZONE") :type/DateTime
+         :TSQUERY       :type/*
+         :TSVECTOR      :type/*
+         :TXID_SNAPSHOT :type/*
+         :UUID          :type/UUID
+         :VARBIT        :type/*
+         :VARBYTE       :type/* ; byte array
+         :VARCHAR       :type/Text
+         :XML           :type/Text
+         (keyword "bit varying")                :type/*
+         (keyword "character varying")          :type/Text
+         (keyword "double precision")           :type/Float
+         (keyword "time with time zone")        :type/Time
+         (keyword "time without time zone")     :type/Time
+         (keyword "timestamp with timezone")    :type/DateTime
+         (keyword "timestamp without timezone") :type/DateTime}]
+    (get type-mapping column-type :type/*))) ; Default to :type/* if no mapping is found
 
 (defn- dbnames-set
   "Transform the string of databases to a set of strings."
@@ -93,78 +96,31 @@
     (set (map #(s/trim %) (s/split (s/trim dbnames) #",")))))
 
 (defn- jdbc-fields-metadata
-  "Reducible metadata about the Fields belonging to a Table, fetching using JDBC DatabaseMetaData methods."
+  "Fetch metadata about the Fields belonging to a Table or View using a SELECT * query."
   [driver ^Connection conn db-name-or-nil schema table-name]
-  (sql-jdbc.sync.common/reducible-results
-   #(.getColumns (.getMetaData conn)
-                 db-name-or-nil
-                 (some->> schema (driver/escape-entity-name-for-metadata driver))
-                 (some->> table-name (driver/escape-entity-name-for-metadata driver))
-                 nil)
-   (fn [^ResultSet rs]
-     #(let [default            (.getString rs "COLUMN_DEF")
-            no-default?        (contains? #{nil "NULL" "null"} default)
-            nullable           (.getInt rs "NULLABLE")
-            not-nullable?      (= 0 nullable)
-            column-name        (.getString rs "COLUMN_NAME")
-            required?          (and no-default? not-nullable?)]
-        (merge
-         {:name                      column-name
-          :database-type             (.getString rs "TYPE_NAME")
-          :database-required         required?}
-         (when-let [remarks (.getString rs "REMARKS")]
-           (when-not (s/blank? remarks)
-             {:field-comment remarks})))))))
-
-(defn fallback-fields-metadata-from-select-query
-  "In some rare cases `:column_name` is blank (eg. SQLite's views with group by) fallback to sniffing the type from a
-  SELECT * query."
-  [driver ^Connection conn db-name-or-nil table-schema table-name]
-  (let [[sql & params] (sql-jdbc.sync.interface/fallback-metadata-query driver db-name-or-nil table-schema table-name)]
-    (reify clojure.lang.IReduceInit
-      (reduce [_ rf init]
-        (with-open [stmt (sql-jdbc.sync.common/prepare-statement driver conn sql params)
-                    rs   (.executeQuery stmt)]
-          (let [metadata (.getMetaData rs)]
-            (reduce
-             ((map (fn [^Integer i]
-                     {:name          (.getColumnName metadata i)
-                      :database-type (.getColumnTypeName metadata i)})) rf)
-             init
-             (range 1 (inc (.getColumnCount metadata))))))))))
+  (let [sql (str "SELECT * FROM " (when schema (str schema ".")) table-name " WHERE 1=0")] ; Query with no rows
+    (with-open [stmt (.createStatement conn)
+                rs   (.executeQuery stmt sql)]
+      (let [metadata (.getMetaData rs)]
+        (mapv (fn [i]
+                (let [column-name (.getColumnName metadata i)
+                      database-type (.getColumnTypeName metadata i)
+                      column-size (.getColumnDisplaySize metadata i)
+                      nullable (.isNullable metadata i)
+                      remarks (.getColumnLabel metadata i)]
+                  {:name column-name
+                   :database-type database-type
+                   :column-size column-size
+                   :nullable? (= nullable DatabaseMetaData/columnNullable)
+                   :remarks remarks}))
+              (range 1 (inc (.getColumnCount metadata))))))))
 
 (defn ^:private fields-metadata
   [driver ^Connection conn {schema :schema, table-name :name} ^String db-name-or-nil]
   {:pre [(instance? Connection conn) (string? table-name)]}
-  (reify clojure.lang.IReduceInit
-    (reduce [_ rf init]
-      ;; 1. Return all the Fields that come back from DatabaseMetaData that include type info.
-      ;;
-      ;; 2. Iff there are some Fields that don't have type info, concatenate
-      ;;    `fallback-fields-metadata-from-select-query`, which fetches the same Fields using a different method.
-      ;;
-      ;; 3. Filter out any duplicates between the two methods using `m/distinct-by`.
-      (let [has-fields-without-type-info? (volatile! false)
-            jdbc-metadata                 (eduction
-                                           (remove (fn [{:keys [database-type]}]
-                                                     (when (s/blank? database-type)
-                                                       (vreset! has-fields-without-type-info? true)
-                                                       true)))
-                                           (jdbc-fields-metadata driver conn db-name-or-nil schema table-name))
-            fallback-metadata             (reify clojure.lang.IReduceInit
-                                            (reduce [_ rf init]
-                                              (reduce
-                                               rf
-                                               init
-                                               (when @has-fields-without-type-info?
-                                                 (fallback-fields-metadata-from-select-query driver conn db-name-or-nil schema table-name)))))]
-        ;; VERY IMPORTANT! DO NOT REWRITE THIS TO BE LAZY! IT ONLY WORKS BECAUSE AS NORMAL-FIELDS GETS REDUCED,
-        ;; HAS-FIELDS-WITHOUT-TYPE-INFO? WILL GET SET TO TRUE IF APPLICABLE AND THEN FALLBACK-FIELDS WILL RUN WHEN
-        ;; IT'S TIME TO START EVALUATING THAT.
-        (reduce
-         ((comp cat (m/distinct-by :name)) rf)
-         init
-         [jdbc-metadata fallback-metadata])))))
+  ;; Attempt to fetch metadata using DatabaseMetaData.getColumns
+  (let [jdbc-metadata (jdbc-fields-metadata driver conn db-name-or-nil schema table-name)]
+    jdbc-metadata))
 
 (defmethod sql-jdbc.describe-table/describe-table-fields :teradata
   [driver conn table db-name-or-nil]
