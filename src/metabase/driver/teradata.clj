@@ -98,22 +98,29 @@
 (defn- jdbc-fields-metadata
   "Fetch metadata about the Fields belonging to a Table or View using a SELECT * query."
   [driver ^Connection conn db-name-or-nil schema table-name]
-  (let [sql (str "SELECT * FROM " (when schema (str schema ".")) table-name " WHERE 1=0")] ; Query with no rows
-    (with-open [stmt (.createStatement conn)
-                rs   (.executeQuery stmt sql)]
-      (let [metadata (.getMetaData rs)]
-        (mapv (fn [i]
-                (let [column-name (.getColumnName metadata i)
-                      database-type (.getColumnTypeName metadata i)
-                      column-size (.getColumnDisplaySize metadata i)
-                      nullable (.isNullable metadata i)
-                      remarks (.getColumnLabel metadata i)]
-                  {:name column-name
-                   :database-type database-type
-                   :column-size column-size
-                   :nullable? (= nullable DatabaseMetaData/columnNullable)
-                   :remarks remarks}))
-              (range 1 (inc (.getColumnCount metadata))))))))
+  (try
+    (let [sql (str "SELECT * FROM " (when schema (str schema ".")) table-name " WHERE 1=0")] ; Query with no rows
+      (with-open [stmt (.createStatement conn)
+                  rs   (.executeQuery stmt sql)]
+        (let [metadata (.getMetaData rs)]
+          (mapv (fn [i]
+                  (let [column-name (.getColumnName metadata i)
+                        database-type (.getColumnTypeName metadata i)
+                        column-size (.getColumnDisplaySize metadata i)
+                        nullable (.isNullable metadata i)
+                        remarks (.getColumnLabel metadata i)]
+                    {:name column-name
+                     :database-type database-type
+                     :column-size column-size
+                     :nullable? (= nullable DatabaseMetaData/columnNullable)
+                     :remarks remarks}))
+                (range 1 (inc (.getColumnCount metadata)))))))
+    (catch java.sql.SQLException e
+      (if (= "42S02" (.getSQLState e)) ; Check for SQLState 42S02 (object does not exist)
+        (do
+          (log/warn (trs "Table or view ''{0}'' in schema ''{1}'' does not exist." table-name schema))
+          []) ; Return an empty field set
+        (throw e))))) ; Re-throw other exceptions
 
 (defn ^:private fields-metadata
   [driver ^Connection conn {schema :schema, table-name :name} ^String db-name-or-nil]
@@ -359,3 +366,4 @@
                                                                                                              :dbname
                                                                                                              :sid
                                                                                                              :catalog))))})
+
