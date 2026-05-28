@@ -1,29 +1,28 @@
 (ns metabase.driver.teradata
-  (:require [clojure
-             [set :as set]
-             [string :as s]]
-            [medley.core :as m]
-            [clojure.tools.logging :as log]
-            [clojure.java.jdbc :as jdbc]
-            [java-time :as t]
-            [metabase
-             [driver :as driver]
-             [util :as u]
-             [config :as config]]
-            [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
-            [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
-            [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
-            [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
-            [metabase.driver.sql.query-processor :as sql.qp]
-            [metabase.driver.sql.util.deduplicate :as deduplicateutil]
-            [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
-            [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
-            [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync.interface]
-            [metabase.util.i18n :refer [trs]]
-            [metabase.util.honey-sql-2 :as h2x])
+  (:refer-clojure :exclude [select-keys empty?])
+  (:require
+   [clojure.java.jdbc :as jdbc]
+   [clojure.set :as set]
+   [clojure.string :as str]
+   [java-time :as t]
+   [metabase.driver :as driver]
+   [metabase.driver.settings :as driver.settings]
+   [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
+   [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
+   [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+   [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
+   [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
+   [metabase.driver.sql.query-processor :as sql.qp]
+   [metabase.driver.sql.util :as sql.u]
+   [metabase.util :as u]
+   [metabase.util.honey-sql-2 :as h2x]
+   [metabase.util.log :as log]
+   [metabase.util.performance :refer [select-keys empty?]])
   (:import [java.sql Connection DatabaseMetaData ResultSet Types PreparedStatement]
            [java.time OffsetDateTime OffsetTime]
            [java.util Calendar TimeZone]))
+
+(set! *warn-on-reflection* true)
 
 (driver/register! :teradata, :parent :sql-jdbc)
 
@@ -93,13 +92,14 @@
   "Transform the string of databases to a set of strings."
   [dbnames]
   (when dbnames
-    (set (map #(s/trim %) (s/split (s/trim dbnames) #",")))))
+    (set (map #(str/trim %) (str/split (str/trim dbnames) #",")))))
 
 (defn- jdbc-fields-metadata
   "Fetch metadata about the Fields belonging to a Table or View using a SELECT * query."
-  [driver ^Connection conn db-name-or-nil schema table-name]
+  [driver ^Connection conn _db-name-or-nil schema table-name]
   (try
-    (let [sql (str "SELECT * FROM " (when schema (str schema ".")) table-name " WHERE 1=0")] ; Query with no rows
+    (let [table (sql.u/quote-name driver :table schema table-name)
+          sql (format "SELECT * FROM %s WHERE 1=0" table)] ; Query with no rows
       (with-open [stmt (.createStatement conn)
                   rs   (.executeQuery stmt sql)]
         (let [metadata (.getMetaData rs)]
@@ -122,19 +122,19 @@
           ;; 42S02: base object gone
           (= "42S02" sqlstate)
           (do
-            (log/warn (trs "Table or view ''{0}'' in schema ''{1}'' does not exist." table-name schema))
+            (log/warnf "Table or view '%s' in schema '%s' does not exist." table-name schema)
             [])
           ;; 42S22: column(s) referenced by the view no longer exist
           (= "42S22" sqlstate)
           (do
-            (log/warn (trs "Skipping fields sync for ''{0}'' in schema ''{1}'' due to missing column(s). Cause: {2}"
-                           table-name schema (.getMessage e)))
+            (log/warnf "Skipping fields sync for '%s' in schema '%s' due to missing column(s). Cause: %s"
+                       table-name schema (.getMessage e))
             [])
           ;; 5407: Invalid operation for DateTime or Interval
           (or (= 5407 error-code) (= "HY000" sqlstate))
           (do
-            (log/warn (trs "Skipping fields sync for ''{0}'' in schema ''{1}'' due to DateTime/Interval error. Cause: {2}"
-                           table-name schema (.getMessage e)))
+            (log/warnf "Skipping fields sync for '%s' in schema '%s' due to DateTime/Interval error. Cause: %s"
+                       table-name schema (.getMessage e))
             [])
           :else
           (throw e)))))) ; Re-throw other exceptions
@@ -155,7 +155,7 @@
 
 (defn- teradata-spec
   "Create a database specification for a Teradata database."
-  [{:keys [host user password port dbnames charset tmode encrypt-data ssl additional-options]
+  [{:keys [host _user _password port dbnames charset tmode encrypt-data ssl _additional-options]
     :or   {host "localhost", charset "UTF8", tmode "ANSI", encrypt-data true, ssl false}
     :as   opts}]
   (merge {:classname   "com.teradata.jdbc.TeraDriver"
@@ -174,7 +174,7 @@
                                   (if ssl
                                     {"SSLMODE" "REQUIRE"}))
                                  (map #(format "%s=%s" (first %) (second %)))
-                                 (clojure.string/join ",")))}
+                                 (str/join ",")))}
          (dissoc opts :host :port :dbnames :tmode :charset :ssl :encrypt-data)))
 
 (defmethod sql-jdbc.conn/connection-details->spec :teradata
@@ -191,8 +191,6 @@
 
 (defn- trunc [format-template v]
   [:trunc v (h2x/literal format-template)])
-
-(def ^:private ^:const one-day [:raw "INTERVAL '1' DAY"])
 
 (def ^:private ^:const now [:raw "CURRENT_TIMESTAMP"])
 
@@ -234,9 +232,6 @@
           :quarter (num-to-interval :month (* amount 3))
           :year (num-to-interval :year amount)))))
 
-(def ^:private timestamp-types
-  #{"timestamp" "timestamp with time zone" "timestamp with local time zone"})
-
 (defmethod sql.qp/unix-timestamp->honeysql [:teradata :seconds] [_ _ field-or-value]
   (:to_timestamp field-or-value))
 
@@ -244,8 +239,8 @@
   (sql.qp/unix-timestamp->honeysql (h2x// field-or-value 1000) :seconds))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :limit]
-  [_ _ honeysql-form {value :limit}]
-  (update honeysql-form :select deduplicateutil/deduplicate-identifiers))
+  [_ _ honeysql-form {_value :limit}]
+  (update honeysql-form :select sql.u/select-clause-deduplicate-aliases))
 
 (defmethod sql.qp/apply-top-level-clause [:teradata :page] [_ _ honeysql-form {{:keys [items page]} :page}]
   (assoc honeysql-form :offset (:raw (format "QUALIFY ROW_NUMBER() OVER (%s) BETWEEN %d AND %d"
@@ -275,7 +270,7 @@
 
 (defn- fast-active-tables
   "Teradata, fast implementation of `fast-active-tables` to support inclusion list."
-  [driver, ^DatabaseMetaData metadata, {{:keys [dbnames]} :details, :as database}]
+  [_driver, ^DatabaseMetaData metadata, {{:keys [dbnames]} :details, :as _database}]
   (let [all-schemas (set (map :table_schem (jdbc/result-set-seq (.getSchemas metadata))))
         dbs (dbnames-set dbnames)
         schemas     (if (empty? dbs)
@@ -333,7 +328,7 @@
 (defn- cleanup-query
   "Remove the OFFSET keyword."
   [query]
-  (update-in query [:native :query] (fn [value] (s/replace value "OFFSET" ""))))
+  (update-in query [:native :query] (fn [value] (str/replace value "OFFSET" ""))))
 
 (defmethod driver/execute-reducible-query :teradata
   [driver query context respond]
@@ -347,12 +342,12 @@
 ;; https://www.mchange.com/projects/c3p0/#acquireRetryDelay
 (defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :teradata
   [driver database]
-  {"acquireRetryDelay"            (or (config/config-int :mb-jdbc-c3po-acquire-retry-delay) 1000)
+  {"acquireRetryDelay"            1000
    "acquireIncrement"             1
    "maxIdleTime"                  (* 6 60 60) ; 6 hours
    "minPoolSize"                  1
    "initialPoolSize"              1
-   "maxPoolSize"                  (or (config/config-int :mb-jdbc-data-warehouse-max-connection-pool-size) 30)
+   "maxPoolSize"                  (driver.settings/jdbc-data-warehouse-max-connection-pool-size)
    "testConnectionOnCheckout"     true
    "maxIdleTimeExcessConnections" (* 5 60)
    "checkoutTimeout"              300000 ; 300 seconds (increase this if needed)
@@ -364,4 +359,3 @@
                                                                                                              :dbname
                                                                                                              :sid
                                                                                                              :catalog))))})
-
